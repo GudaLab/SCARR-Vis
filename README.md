@@ -7,7 +7,7 @@ SCARR-Vis is an R/Shiny application for interactive assessment and correction of
 Estimation Method and Parameters
 1. SoupX: models background 'soup' RNA and adjusts counts.
 2. DecontX: from celda infers cell-specific contamination fractions.
-3.scCDC: identifies contamination-causing genes (GCGs) and optionally corrects them.
+3. scCDC: identifies contamination-causing genes (GCGs) and optionally corrects them.
 4. FastCAR: profiles ambient RNA using empty droplets and estimates per-cell contamination.
 
 ## Use SCARR-Vis Online
@@ -70,7 +70,7 @@ bioc_packages <- c("biomaRt", "rhdf5", "celda", "decontX", "SingleCellExperiment
 # List of GitHub packages
 github_packages <- list(
   "patchwork" = "thomasp85/patchwork",
-  "SoupX" = "constantAmateur/SoupX"",
+  "SoupX" = "constantAmateur/SoupX",
   "scCDC" = "ZJU-UoE-CCW-LAB/scCDC",
   "FastCAR" = "https://git.web.rug.nl/P278949/FastCAR"
 )
