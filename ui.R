@@ -724,7 +724,7 @@ ui <- navbarPage(
         ),
         div(
           style = "text-align:center; margin-bottom:20px;",
-          tags$img(src = "images/able_6.jpg", class = "img-responsive", style = "max-width:100%;"),
+          tags$img(src = "images/table_6.jpg", class = "img-responsive", style = "max-width:100%;"),
           tags$small(
             em("Figure 6. Cell-level summary table.")
           )
