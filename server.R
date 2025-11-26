@@ -448,26 +448,51 @@ server <- function(input, output, session) {
         log_msg("FastCAR aborted: package not available.")
         return()
       }
-      log_msg("Running FastCAR ambient RNA correction...")
+      
+      # --- collect parameters from UI ---
+      empty_cutoff  <- as.integer(input$fastcar_empty_cutoff %||% 100L)
+      contam_cutoff <- as.numeric(input$fastcar_contam_cutoff %||% 0.05)
+      do_profile    <- isTRUE(input$fastcar_do_profile)
+      prof_start    <- as.integer(input$fastcar_profile_start %||% 10L)
+      prof_stop     <- as.integer(input$fastcar_profile_stop %||% 500L)
+      prof_by       <- as.integer(input$fastcar_profile_by %||% 10L)
+      use_reco      <- isTRUE(input$fastcar_use_recommended)
+      
+      #log_msg("Decontamination method: FastCAR")
+      log_msg(sprintf(
+        paste(
+          "FastCAR parameters:",
+          "empty_droplet_cutoff=%d, contamination_chance_cutoff=%.3f,",
+          "do_profile=%s, profile_start=%d, profile_stop=%d,",
+          "profile_by=%d, use_recommended_cutoff=%s"
+        ),
+        empty_cutoff, contam_cutoff, do_profile,
+        prof_start, prof_stop, prof_by, use_reco
+      ))
+      
+      log_msg("Completed FastCAR ambient RNA correction...")
+      
       fc <- tryCatch(
         scarr_fastcar_wrapper(
           raw,             # full_mat
           filt,            # cell_mat
-          empty_droplet_cutoff        = as.integer(input$fastcar_empty_cutoff %||% 100L),
-          contamination_chance_cutoff = as.numeric(input$fastcar_contam_cutoff %||% 0.05),
-          do_profile                  = isTRUE(input$fastcar_do_profile),
-          profile_start               = as.integer(input$fastcar_profile_start %||% 10L),
-          profile_stop                = as.integer(input$fastcar_profile_stop %||% 500L),
-          profile_by                  = as.integer(input$fastcar_profile_by %||% 10L),
-          use_recommended_cutoff      = isTRUE(input$fastcar_use_recommended)
+          empty_droplet_cutoff        = empty_cutoff,
+          contamination_chance_cutoff = contam_cutoff,
+          do_profile                  = do_profile,
+          profile_start               = prof_start,
+          profile_stop                = prof_stop,
+          profile_by                  = prof_by,
+          use_recommended_cutoff      = use_reco
         ),
         error = function(e) e
       )
+      
       if (inherits(fc, "error")) {
         showNotification(paste("FastCAR failed:", fc$message), type = "error")
         log_msg("FastCAR failed:", fc$message)
         return()
       }
+      
       adj <- fc$corrected_counts
       if (!inherits(adj, "dgCMatrix")) adj <- as(adj, "dgCMatrix")
       rv$adj_counts <- round_sparse(adj)
@@ -479,11 +504,25 @@ server <- function(input, output, session) {
         row.names = colnames(filt),
         stringsAsFactors = FALSE
       )
-      rv$rho  <- NULL
-      rv$sc   <- list(metaData = md, fastcar_aux = fc$aux, fastcar_params = fc$params)
-      rv$auto <- NULL
       
-      # ---- scCDC ----
+      # make structure consistent with other methods so the reproducibility
+      # table/manual can read rv$sc$params
+      rv$rho  <- NULL
+      rv$auto <- NULL
+      rv$sc   <- list(
+        metaData = md,
+        params   = c(
+          empty_droplet_cutoff        = empty_cutoff,
+          contamination_chance_cutoff = contam_cutoff,
+          do_profile                  = do_profile,
+          profile_start               = prof_start,
+          profile_stop                = prof_stop,
+          profile_by                  = prof_by,
+          use_recommended_cutoff      = use_reco
+        ),
+        fastcar_aux = fc$aux
+      )
+       # ---- scCDC ----
     } else if (identical(input$method, "scCDC")) {
       seu <- rv$seu_pre
       if (is.null(seu) || is.null(seu$seurat_clusters)) {

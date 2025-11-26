@@ -988,7 +988,15 @@ ui <- navbarPage(
         ),
         
         hr(),
-        p("See the Estimation, QC, and visualization tabs for diagnostics and plots after you run the pipeline.")
+        p("See the Estimation, QC, and visualization tabs for diagnostics and plots after you run the pipeline."),
+        hr(),
+        h3("Expected runtime"),
+        p(
+          "Runtime depends on dataset size, selected method, and hardware. ",
+          "On a typical modern laptop (4–8 CPU cores, 16 GB RAM), running the full ",
+          "SCARR-Vis pipeline on the bundled GSM7681687 example data < 5000 cells (SoupX/DecontX/scCDC/FastCAR, ",
+          "plus QC, clustering, UMAP/TSNE, and plots) usually completes in a few minutes per method (roughly 2–5 minutes)."
+        ),
       )
     )
   )
