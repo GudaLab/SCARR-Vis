@@ -450,7 +450,7 @@ ui <- navbarPage(
           ),
           
           tabPanel(
-            "Cells Table)",
+            "Cells Table",
             fluidRow(column(12, downloadBttn("dl_cells_csv", "Download Cells Table (CSV)"))),
             br(),
             h3("Cell stats table"),
@@ -523,185 +523,13 @@ ui <- navbarPage(
             tags$h4("R Session info"),
             downloadBttn("download_sess", "Download session-info.txt"),
             br(),
-            withSpinner(verbatimTextOutput("sess"))
+            withSpinner(verbatimTextOutput("sess"), type=4)
           )
         )
       )
     )
   ),
   
-  # --- Manual tab ---
-  # tabPanel(
-  #   "Manual",
-  #   fluidRow(
-  #     column(
-  #       8, offset = 2,
-  #       br(), h3("Parameter reference"),
-  #       h4("General"),
-  #       tags$table(
-  #         class = "table table-condensed",
-  #         tags$thead(tags$tr(tags$th("Name"), tags$th("Default"), tags$th("Min"), tags$th("Max"), tags$th("Notes"))),
-  #         tags$tbody(
-  #           tags$tr(
-  #             tags$td(code("min_cells")), tags$td("3"), tags$td("1"), tags$td("—"),
-  #             tags$td("Minimum cells per gene to retain when creating Seurat objects.")
-  #           )
-  #         )
-  #       ),
-  #       h4("SoupX"),
-  #       tags$table(
-  #         class = "table table-condensed",
-  #         tags$thead(tags$tr(tags$th("Name"), tags$th("Default"), tags$th("Min"), tags$th("Max"), tags$th("Notes"))),
-  #         tags$tbody(
-  #           tags$tr(tags$td(code("do_auto")), tags$td("TRUE"), tags$td("FALSE"), tags$td("TRUE"),
-  #                   tags$td("If TRUE, uses autoEstCont to estimate ρ per cell.")),
-  #           tags$tr(tags$td(code("manual_rho")), tags$td("0.05"), tags$td("0"), tags$td("1"),
-  #                   tags$td("Used only if do_auto = FALSE; uniform ρ.")),
-  #           tags$tr(tags$td(code("soupRange")), tags$td("c(0, 100)"), tags$td("0"), tags$td("2000"),
-  #                   tags$td("UMI range of empty droplets to build soup profile.")),
-  #           tags$tr(tags$td(code("keepDroplets")), tags$td("FALSE"), tags$td("FALSE"), tags$td("TRUE"),
-  #                   tags$td("Keeps droplet table in memory; uses more RAM."))
-  #         )
-  #       ),
-  #       h4("DecontX"),
-  #       tags$table(
-  #         class = "table table-condensed",
-  #         tags$thead(tags$tr(tags$th("Name"), tags$th("Default"), tags$th("Min"), tags$th("Max"), tags$th("Notes"))),
-  #         tags$tbody(
-  #           tags$tr(tags$td(code("decontx_use_clusters")), tags$td("TRUE"), tags$td("FALSE"), tags$td("TRUE"),
-  #                   tags$td("If TRUE, uses Seurat clusters as priors.")),
-  #           tags$tr(tags$td(code("decontx_maxiter (maxIter)")), tags$td("500"), tags$td("50"), tags$td("10000"),
-  #                   tags$td("Maximum EM iterations.")),
-  #           tags$tr(tags$td(code("decontx_delta")), tags$td("10,10"), tags$td(">0,>0"), tags$td("—"),
-  #                   tags$td("Dirichlet prior hyperparameters as two numbers.")),
-  #           tags$tr(tags$td(code("decontx_estimateDelta")), tags$td("TRUE"), tags$td("FALSE"), tags$td("TRUE"),
-  #                   tags$td("Estimate delta during fitting.")),
-  #           tags$tr(tags$td(code("decontx_convergence")), tags$td("0.001"), tags$td("1e-6"), tags$td("0.1"),
-  #                   tags$td("EM tolerance for convergence.")),
-  #           tags$tr(tags$td(code("decontx_iterLogLik")), tags$td("10"), tags$td("1"), tags$td("1000"),
-  #                   tags$td("Iterations between log-likelihood checks.")),
-  #           tags$tr(tags$td(code("decontx_varGenes")), tags$td("5000"), tags$td("100"), tags$td("30000"),
-  #                   tags$td("Number of variable genes used by decontX."))
-  #         )
-  #       ),
-  #       h4("scCDC"),
-  #       tags$table(
-  #         class = "table table-condensed",
-  #         tags$thead(tags$tr(tags$th("Name"), tags$th("Default / Option"), tags$th("Notes"))),
-  #         tags$tbody(
-  #           tags$tr(tags$td(code("restriction_factor")), tags$td("0.5 (dropdown)"),
-  #                   tags$td("Controls aggressiveness of GCG detection.")),
-  #           tags$tr(tags$td(code("min.cell")), tags$td("100 (dropdown)"),
-  #                   tags$td("Minimum cells per gene for estimation.")),
-  #           tags$tr(tags$td(code("percent.cutoff")), tags$td("0.2 (dropdown)"),
-  #                   tags$td("Threshold for ambient fraction filtering."))
-  #         )
-  #       ),
-  #       h4("FastCAR"),
-  #       tags$table(
-  #         class = "table table-condensed",
-  #         tags$thead(tags$tr(tags$th("Name"), tags$th("Default"), tags$th("Min"), tags$th("Max"), tags$th("Notes"))),
-  #         tags$tbody(
-  #           tags$tr(tags$td(code("fastcar_empty_cutoff")), tags$td("100"), tags$td("10"), tags$td("5000"),
-  #                   tags$td("Maximum UMIs to call a droplet 'empty'. Higher values can over-correct lowly expressed genes.")),
-  #           tags$tr(tags$td(code("fastcar_contam_cutoff")), tags$td("0.05"), tags$td("0"), tags$td("0.5"),
-  #                   tags$td("Contamination chance cutoff used for background detection; lower is more conservative.")),
-  #           tags$tr(tags$td(code("fastcar_do_profile")), tags$td("TRUE"), tags$td("FALSE"), tags$td("TRUE"),
-  #                   tags$td("If TRUE, runs describe.ambient.RNA.sequence to profile ambient RNA over a grid of empty-droplet cutoffs.")),
-  #           tags$tr(tags$td(code("fastcar_profile_start")), tags$td("10"), tags$td("1"), tags$td("2000"),
-  #                   tags$td("Lower bound of UMI cutoff grid for ambient profiling.")),
-  #           tags$tr(tags$td(code("fastcar_profile_stop")), tags$td("500"), tags$td("50"), tags$td("10000"),
-  #                   tags$td("Upper bound of UMI cutoff grid for ambient profiling.")),
-  #           tags$tr(tags$td(code("fastcar_profile_by")), tags$td("10"), tags$td("1"), tags$td("100"),
-  #                   tags$td("Step size of UMI cutoff grid for ambient profiling.")),
-  #           tags$tr(tags$td(code("fastcar_use_recommended")), tags$td("TRUE"), tags$td("FALSE"), tags$td("TRUE"),
-  #                   tags$td("If TRUE, uses FastCAR's recommended empty-droplet cutoff based on the ambient profile."))
-  #         )
-  #       ),
-  #       h4("Seurat processing (defaults used in app)"),
-  #       tags$table(
-  #         class = "table table-condensed",
-  #         tags$thead(tags$tr(
-  #           tags$th("Step"), tags$th("Key parameters (value)"), tags$th("Notes")
-  #         )),
-  #         tags$tbody(
-  #           tags$tr(
-  #             tags$td("Mito %"),
-  #             tags$td(HTML(paste0(
-  #               code("PercentageFeatureSet"), " pattern = ",
-  #               code("^MT- (human) / ^mt- (mouse)")
-  #             ))),
-  #             tags$td("Species-aware mitochondrial regex.")
-  #           ),
-  #           tags$tr(
-  #             tags$td("NormalizeData"),
-  #             tags$td(HTML(paste(
-  #               code('normalization.method="LogNormalize"'), ",",
-  #               code("scale.factor=10000")
-  #             ))),
-  #             tags$td("Standard log-normalization.")
-  #           ),
-  #           tags$tr(
-  #             tags$td("FindVariableFeatures"),
-  #             tags$td(HTML(paste(
-  #               code('selection.method="vst"'), ",",
-  #               code("nfeatures=2000")
-  #             ))),
-  #             tags$td("Top 2,000 HVGs (Seurat default).")
-  #           ),
-  #           tags$tr(
-  #             tags$td("ScaleData"),
-  #             tags$td(HTML(paste(
-  #               code("center=TRUE"), ",", code("scale=TRUE"), ",", code("verbose=FALSE")
-  #             ))),
-  #             tags$td("Centers and scales features before PCA.")
-  #           ),
-  #           tags$tr(
-  #             tags$td("RunPCA"),
-  #             tags$td(HTML(paste(
-  #               code("features=VariableFeatures(object)"), ",",
-  #               code("npcs=30"), ",", code("verbose=FALSE")
-  #             ))),
-  #             tags$td("PCA on HVGs; 30 PCs kept.")
-  #           ),
-  #           tags$tr(
-  #             tags$td("FindNeighbors"),
-  #             tags$td(HTML(paste(
-  #               code("reduction='pca'"), ",",
-  #               code("dims=1:20"), ",",
-  #               code("k.param=20")
-  #             ))),
-  #             tags$td("SNN graph on first 20 PCs; k=20.")
-  #           ),
-  #           tags$tr(
-  #             tags$td("FindClusters"),
-  #             tags$td(HTML(paste(
-  #               code("resolution=0.5"), ",",
-  #               code("algorithm=1")
-  #             ))),
-  #             tags$td("Louvain (algorithm 1) at res=0.5.")
-  #           ),
-  #           tags$tr(
-  #             tags$td("RunUMAP"),
-  #             tags$td(HTML(paste(
-  #               code("reduction='pca'"), ",",
-  #               code("dims=1:20"), ",",
-  #               code("n.neighbors=30"), ",",
-  #               code("min.dist=0.3"), ",",
-  #               code('umap.method="uwot"'), ",",
-  #               code('metric="cosine"')
-  #             ))),
-  #             tags$td("UMAP via uwot; first 20 PCs.")
-  #           )
-  #         )
-  #       ),
-  #       hr(),
-  #       p("This pipeline is run twice: once on the uploaded filtered counts (Pre) and again on the decontaminated counts (Post)."),
-  #       hr(),
-  #       p("See the Estimation and QC tabs for diagnostics after a run.")
-  #     )
-  #   )
-  # )
   tabPanel(
     "Manual",
     fluidRow(
@@ -810,7 +638,7 @@ ui <- navbarPage(
           style = "text-align:center; margin-bottom:20px;",
           tags$img(src = "images/3.1.jpg", class = "img-responsive", style = "max-width:100%;"),
           tags$small(
-            em("Figure 3.1. SoupX diagnostics: (a) ρ density, (b–c) ρ vs nUMIs.")
+            em("Figure 3.1. SoupX diagnostics: (a) ρ density, (b) ρ vs nUMIs (c) auto estimation contamination diagnostic.")
           )
         ),
         

@@ -134,3 +134,99 @@ increment_count <- function() {
   saveRDS(n, count_file)
   n
 }
+
+# if (.Platform$OS.type == "windows") {
+#   # For Windows
+#   cache_path <- file.path(Sys.getenv("LOCALAPPDATA"), "R", "cache", "R", "BiocFileCache")
+# } else {
+#   # For Linux/macOS
+#   cache_path <- file.path(Sys.getenv("HOME"), ".cache", "R", "BiocFileCache")
+# }
+# 
+# # Create directory if it doesn't exist
+# if (!dir.exists(cache_path)) {
+#   dir.create(cache_path, recursive = TRUE, showWarnings = FALSE)
+# }
+# 
+# # Set BiocFileCache directory environment variable
+# Sys.setenv("BIOCFILECACHE_DIR" = cache_path)
+# 
+# # URL of the zip file
+# zip_url <- "https://www.gudalab-rtools.net/SCARR-Vis/example/GSM7681687.zip"
+# 
+# # Define target directory and subdirectory
+# target_dir <- file.path("www", "example", "GSM7681687")
+# example_data_dir <- file.path(target_dir, "example")
+# 
+# # Check if example_data already exists
+# if (!dir.exists(example_data_dir)) {
+#   # Create www folder if it doesn't exist
+#   if (!dir.exists(target_dir)) {
+#     dir.create(target_dir, recursive = TRUE)
+#   }
+#   
+#   # Path for the downloaded zip file
+#   zip_file <- tempfile(fileext = ".zip")
+#   
+#   # Download the zip file
+#   download.file(zip_url, zip_file, mode = "wb")
+#   
+#   # Extract the zip file into the www folder
+#   unzip(zip_file, exdir = target_dir)
+#   
+#   # Remove the zip file after extraction
+#   #file.remove(zip_file)
+#   
+#   cat("Files extracted to:", target_dir, "\n")
+# } else {
+#   cat("example_data folder already exists. Skipping download.\n")
+# }
+
+
+## --- BiocFileCache: set a consistent cache directory -----------------------
+
+# Use R's recommended cross-platform cache location for BiocFileCache
+cache_path <- tools::R_user_dir("BiocFileCache", which = "cache")
+
+# Create directory if it doesn't exist
+if (!dir.exists(cache_path)) {
+  dir.create(cache_path, recursive = TRUE, showWarnings = FALSE)
+}
+
+# Tell BiocFileCache to use this path
+# (must be set before BiocFileCache is created/used)
+Sys.setenv(BFC_CACHE = cache_path)
+# Alternatively, if BiocFileCache is already loaded:
+# BiocFileCache::setBFCOption("CACHE", cache_path)
+
+## --- Download GSM7681687 example data into www/example/GSM7681687 ----------
+
+# URL of the zip file
+zip_url <- "https://www.gudalab-rtools.net/SCARR-Vis/example/GSM7681687.zip"
+
+# Define target directory
+target_dir <- file.path("www", "example", "GSM7681687")
+
+# Check if example data already exists
+if (!dir.exists(target_dir)) {
+  # Create www/example/GSM7681687 if it doesn't exist
+  dir.create(target_dir, recursive = TRUE, showWarnings = FALSE)
+  
+  # Path for the downloaded zip file
+  zip_file <- tempfile(fileext = ".zip")
+  
+  # Download the zip file
+  download.file(zip_url, zip_file, mode = "wb")
+  
+  # Extract the zip file into the target directory
+  unzip(zip_file, exdir = target_dir)
+  
+  # Remove the zip file after extraction
+  unlink(zip_file)
+  
+  cat("Files extracted to:", normalizePath(target_dir), "\n")
+} else {
+  cat("Example data folder already exists at:",
+      normalizePath(target_dir), "- skipping download.\n")
+}
+

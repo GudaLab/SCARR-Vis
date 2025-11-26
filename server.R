@@ -46,7 +46,7 @@ server <- function(input, output, session) {
     "Estimation",
     "QC (Post)",
     "Cluster counts (Pre vs post)",
-    "Cells Table)",
+    "Cells Table",
     "Top Genes",
     "UMAP/TSNE (Pre vs Post)",
     "Heatmap (Pre vs Post)",
