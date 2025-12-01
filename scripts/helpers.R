@@ -5,10 +5,13 @@
 # -----------------------------
 read_10x_any <- function(path_or_zip) {
   stopifnot(file.exists(path_or_zip))
-  ext <- tolower(file_ext(path_or_zip))
-  if (file.info(path_or_zip)$isdir) return(Seurat::Read10X(path_or_zip))
+  ext <- tolower(tools::file_ext(path_or_zip))
+  if (file.info(path_or_zip)$isdir) {
+    return(Seurat::Read10X(path_or_zip))
+  }
   if (ext == "zip") {
-    td <- tempfile(pattern = "unz_10x_"); dir.create(td)
+    td <- tempfile(pattern = "unz_10x_")
+    dir.create(td)
     utils::unzip(path_or_zip, exdir = td)
     cand <- list.dirs(td, recursive = TRUE, full.names = TRUE)
     has_mtx <- vapply(
@@ -42,20 +45,31 @@ map_ensembl_to_symbol <- function(ids, species_genome) {
   if (is.null(dataset)) return(setNames(ids, NULL))
   ids_stripped <- sub("[.].*$", "", ids)
   mart <- NULL
-  try({ mart <- biomaRt::useEnsembl("ensembl", dataset = dataset) }, silent = TRUE)
+  try({
+    mart <- biomaRt::useEnsembl("ensembl", dataset = dataset)
+  }, silent = TRUE)
   if (is.null(mart)) try({
     mart <- biomaRt::useMart("ENSEMBL_MART_ENSEMBL", dataset = dataset,
                              host = "https://www.ensembl.org")
   }, silent = TRUE)
   if (is.null(mart)) return(setNames(ids, NULL))
   tbl <- tryCatch({
-    biomaRt::getBM(c("ensembl_gene_id","external_gene_name"), "ensembl_gene_id",
-                   unique(ids_stripped), mart)
+    biomaRt::getBM(
+      c("ensembl_gene_id","external_gene_name"),
+      "ensembl_gene_id",
+      unique(ids_stripped),
+      mart
+    )
   }, error = function(e) NULL)
   if (is.null(tbl) || nrow(tbl) == 0) return(setNames(ids, NULL))
   map <- setNames(tbl$external_gene_name, tbl$ensembl_gene_id)
-  unname(ifelse(ids_stripped %in% names(map) & nzchar(map[ids_stripped]),
-                map[ids_stripped], ids))
+  unname(
+    ifelse(
+      ids_stripped %in% names(map) & nzchar(map[ids_stripped]),
+      map[ids_stripped],
+      ids
+    )
+  )
 }
 
 collapse_duplicated_rows <- function(m) {
@@ -63,21 +77,27 @@ collapse_duplicated_rows <- function(m) {
   f <- factor(rn, levels = unique(rn))
   Mt <- as(m, "dgTMatrix")
   i_new <- as.integer(f)[Mt@i + 1]
-  res <- Matrix::sparseMatrix(i = i_new, j = Mt@j + 1, x = Mt@x,
-                              dims = c(length(levels(f)), ncol(m)))
-  rownames(res) <- levels(f); colnames(res) <- colnames(m); res
+  res <- Matrix::sparseMatrix(
+    i = i_new,
+    j = Mt@j + 1,
+    x = Mt@x,
+    dims = c(length(levels(f)), ncol(m))
+  )
+  rownames(res) <- levels(f)
+  colnames(res) <- colnames(m)
+  res
 }
 
 species_defaults <- function(species_genome) {
   if (identical(species_genome, "Mouse (GRCm39)")) {
     list(
       mito_regex      = "^mt-",
-      default_nonexp  = c("Erdr1","Ccl5","Ccl4","Lyz2","Prg4")  # example defaults
+      default_nonexp  = c("Erdr1","Ccl5","Ccl4","Lyz2","Prg4")
     )
   } else if (identical(species_genome, "Human (GRCh38)")) {
     list(
       mito_regex      = "^MT-",
-      default_nonexp  = c("HBB","HBA1","HBA2","IGKC","PRM1")    # example defaults
+      default_nonexp  = c("HBB","HBA1","HBA2","IGKC","PRM1")
     )
   } else {
     list(
@@ -99,8 +119,81 @@ theme_clean <- ggplot2::theme(
   plot.margin      = grid::unit(c(1, 1,  1, 1), "lines")
 )
 
+# ---------- Helper: write proper 10x-style MTX triple (optionally gzipped) ----------
+write_cleaned_10x <- function(mat, outdir, gzip = TRUE) {
+  stopifnot(inherits(mat, "dgCMatrix"))
+  
+  if (!dir.exists(outdir)) {
+    dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
+  }
+  
+  # ensure we have row/colnames
+  if (is.null(colnames(mat))) {
+    colnames(mat) <- sprintf("cell_%s", seq_len(ncol(mat)))
+  }
+  if (is.null(rownames(mat))) {
+    rownames(mat) <- sprintf("gene_%s", seq_len(nrow(mat)))
+  }
+  
+  # 1) plain text matrix.mtx
+  mm_path <- file.path(outdir, "matrix.mtx")
+  Matrix::writeMM(mat, mm_path)
+  
+  # 2) barcodes.tsv (one barcode per line, no header)
+  bar_path <- file.path(outdir, "barcodes.tsv")
+  write.table(
+    colnames(mat),
+    file = bar_path,
+    quote = FALSE,
+    sep = "\t",
+    row.names = FALSE,
+    col.names = FALSE
+  )
+  
+  # 3) features.tsv (3 columns, no header)
+  feat_path <- file.path(outdir, "features.tsv")
+  features <- data.frame(
+    gene_id      = rownames(mat),
+    gene_symbol  = rownames(mat),
+    feature_type = "Gene Expression",
+    stringsAsFactors = FALSE
+  )
+  write.table(
+    features,
+    file = feat_path,
+    quote = FALSE,
+    sep = "\t",
+    row.names = FALSE,
+    col.names = FALSE
+  )
+  
+  if (isTRUE(gzip)) {
+    gz_one <- function(path) {
+      con_in  <- file(path, "rb")
+      con_out <- gzfile(paste0(path, ".gz"), "wb")
+      on.exit({
+        try(close(con_in),  silent = TRUE)
+        try(close(con_out), silent = TRUE)
+      }, add = FALSE)
+      repeat {
+        buf <- readBin(con_in, what = "raw", n = 65536L)
+        if (!length(buf)) break
+        writeBin(buf, con_out)
+      }
+      file.remove(path)
+    }
+    gz_one(mm_path)
+    gz_one(bar_path)
+    gz_one(feat_path)
+  }
+  
+  invisible(outdir)
+}
+
 write_10x_h5 <- function(mat, file) {
-  if (!requireNamespace("rhdf5", quietly = TRUE)) stop("Package 'rhdf5' is required to write .h5")
+  if (!requireNamespace("rhdf5", quietly = TRUE)) {
+    stop("Package 'rhdf5' is required to write .h5")
+  }
   mat <- as(mat, "dgCMatrix")
   rhdf5::h5createFile(file)
   rhdf5::h5createGroup(file, "matrix")
@@ -110,10 +203,15 @@ write_10x_h5 <- function(mat, file) {
   rhdf5::h5write(as.integer(c(nrow(mat), ncol(mat))), file, "matrix/shape")
   rhdf5::h5write(as.character(colnames(mat)), file, "matrix/barcodes")
   rhdf5::h5createGroup(file, "matrix/features")
-  gene_ids <- rownames(mat); gene_names <- rownames(mat)
+  gene_ids   <- rownames(mat)
+  gene_names <- rownames(mat)
   rhdf5::h5write(as.character(gene_names), file, "matrix/features/name")
   rhdf5::h5write(as.character(gene_ids),   file, "matrix/features/id")
-  rhdf5::h5write(rep("Gene Expression", length(gene_ids)), file, "matrix/features/feature_type")
+  rhdf5::h5write(
+    rep("Gene Expression", length(gene_ids)),
+    file,
+    "matrix/features/feature_type"
+  )
   rhdf5::H5close()
 }
 
@@ -130,6 +228,7 @@ safe_rowsums <- function(m) {
   if (is.null(dm) || any(dm == 0)) return(NULL)
   Matrix::rowSums(m)
 }
+
 safe_colsums <- function(m, logical_gt0 = FALSE) {
   if (is.null(m)) return(NULL)
   dm <- dim(m)
@@ -157,11 +256,17 @@ compute_soup_counts <- function(sc, raw_mat = NULL, filt_mat = NULL) {
   }
   gsum
 }
+
 soup_profile_df <- function(sc, raw_mat = NULL, filt_mat = NULL) {
   counts <- compute_soup_counts(sc, raw_mat, filt_mat)
   est <- as.numeric(counts) / sum(counts)
-  data.frame(counts = as.numeric(counts), est = est,
-             row.names = names(counts), check.names = FALSE, stringsAsFactors = FALSE)
+  data.frame(
+    counts = as.numeric(counts),
+    est    = est,
+    row.names = names(counts),
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
 }
 
 # Misc
@@ -169,7 +274,6 @@ clean_gene_list <- function(x) {
   if (is.null(x) || !nzchar(x)) return(character(0))
   unique(trimws(unlist(strsplit(x, "[,;\\s]+"))))
 }
-
 
 # -----------------------------
 # FastCAR helpers
@@ -188,7 +292,6 @@ scarr_fastcar_determine_background <- function(full_mat,
                                                contamination_chance_cutoff) {
   stopifnot(methods::is(full_mat, "dgCMatrix"))
   
-  # which barcodes are "empty" but not completely unused
   cs <- Matrix::colSums(full_mat)
   empties <- cs < empty_droplet_cutoff & cs > 0
   if (!any(empties)) {
@@ -199,18 +302,15 @@ scarr_fastcar_determine_background <- function(full_mat,
   
   sub_mat <- full_mat[, empties, drop = FALSE]
   
-  # row-wise maxima in empty droplets
   bg_max <- NULL
   if (requireNamespace("qlcMatrix", quietly = TRUE)) {
     bg_max <- as.numeric(qlcMatrix::rowMax(sub_mat))
   } else {
-    # fallback: dense; OK for small datasets
     warning("Package 'qlcMatrix' not available; using dense matrix for FastCAR background computation. This may use a lot of memory for large data.")
     bg_max <- apply(as.matrix(sub_mat), 1L, max)
   }
   names(bg_max) <- rownames(full_mat)
   
-  # how often each gene shows up in empties
   occurrences <- Matrix::rowSums(sub_mat != 0)
   n_empty     <- sum(empties)
   if (!is.finite(n_empty) || n_empty == 0) {
@@ -230,8 +330,10 @@ scarr_fastcar_wrapper <- function(full_mat, cell_mat,
                                   profile_start = 10L, profile_stop = 500L, profile_by = 10L,
                                   use_recommended_cutoff = TRUE,
                                   seed = 1L) {
-  stopifnot(methods::is(full_mat, "dgCMatrix"),
-            methods::is(cell_mat, "dgCMatrix"))
+  stopifnot(
+    methods::is(full_mat, "dgCMatrix"),
+    methods::is(cell_mat, "dgCMatrix")
+  )
   if (!fastcar_available()) {
     stop("FastCAR is not available. Please install the 'FastCAR' package in this R environment.")
   }
@@ -240,10 +342,10 @@ scarr_fastcar_wrapper <- function(full_mat, cell_mat,
   amb_profile <- NULL
   if (isTRUE(do_profile)) {
     amb_profile <- FastCAR::describe.ambient.RNA.sequence(
-      fullCellMatrix           = full_mat,
-      start                    = profile_start,
-      stop                     = profile_stop,
-      by                       = profile_by,
+      fullCellMatrix            = full_mat,
+      start                     = profile_start,
+      stop                      = profile_stop,
+      by                        = profile_by,
       contaminationChanceCutoff = contamination_chance_cutoff
     )
     if (isTRUE(use_recommended_cutoff)) {
@@ -257,14 +359,12 @@ scarr_fastcar_wrapper <- function(full_mat, cell_mat,
     }
   }
   
-  # use our sparse-friendly background computation (avoids rowQ / Biobase issues)
   background_to_remove <- scarr_fastcar_determine_background(
     full_mat,
-    empty_droplet_cutoff = empty_droplet_cutoff,
+    empty_droplet_cutoff        = empty_droplet_cutoff,
     contamination_chance_cutoff = contamination_chance_cutoff
   )
   
-  # then apply FastCAR's efficient sparse subtraction
   corrected <- FastCAR::remove.background(cell_mat, background_to_remove)
   
   delta <- cell_mat - corrected
@@ -277,9 +377,11 @@ scarr_fastcar_wrapper <- function(full_mat, cell_mat,
       emptyDropletCutoff        = empty_droplet_cutoff,
       contaminationChanceCutoff = contamination_chance_cutoff,
       profiled                  = isTRUE(do_profile),
-      profile_grid              = if (isTRUE(do_profile)) list(start = profile_start,
-                                                               stop  = profile_stop,
-                                                               by    = profile_by) else NULL,
+      profile_grid              = if (isTRUE(do_profile)) list(
+        start = profile_start,
+        stop  = profile_stop,
+        by    = profile_by
+      ) else NULL,
       usedRecommendedCutoff     = isTRUE(use_recommended_cutoff)
     ),
     corrected_counts = corrected,
@@ -291,31 +393,28 @@ scarr_fastcar_wrapper <- function(full_mat, cell_mat,
   )
 }
 
-# build a ggplot / patchwork version of the ambient profile
 fastcar_ambient_profile_plot <- function(amb_profile) {
   if (is.null(amb_profile)) return(NULL)
   
   df <- as.data.frame(amb_profile)
   
-  # old FastCAR: rownames are cutoffs, 3 unnamed columns
-  # new FastCAR: has columns cutoffValue, nEmptyDroplets, genesInBackground, genesContaminating
   if ("cutoffValue" %in% colnames(df)) {
-    cutoff            <- df$cutoffValue
-    nEmptyDroplets    <- df$nEmptyDroplets
-    genesInBackground <- df$genesInBackground
-    genesContaminating<- df$genesContaminating
+    cutoff             <- df$cutoffValue
+    nEmptyDroplets     <- df$nEmptyDroplets
+    genesInBackground  <- df$genesInBackground
+    genesContaminating <- df$genesContaminating
   } else {
-    cutoff            <- as.numeric(rownames(df))
-    nEmptyDroplets    <- df[[1]]
-    genesInBackground <- df[[2]]
-    genesContaminating<- df[[3]]
+    cutoff             <- as.numeric(rownames(df))
+    nEmptyDroplets     <- df[[1]]
+    genesInBackground  <- df[[2]]
+    genesContaminating <- df[[3]]
   }
   
   d <- data.frame(
-    cutoff            = as.numeric(cutoff),
-    nEmptyDroplets    = as.numeric(nEmptyDroplets),
-    genesInBackground = as.numeric(genesInBackground),
-    genesContaminating= as.numeric(genesContaminating)
+    cutoff             = as.numeric(cutoff),
+    nEmptyDroplets     = as.numeric(nEmptyDroplets),
+    genesInBackground  = as.numeric(genesInBackground),
+    genesContaminating = as.numeric(genesContaminating)
   )
   
   p_top <- ggplot2::ggplot(d, ggplot2::aes(x = cutoff, y = nEmptyDroplets)) +
@@ -334,12 +433,27 @@ fastcar_ambient_profile_plot <- function(amb_profile) {
   
   p_bot <- ggplot2::ggplot(d, ggplot2::aes(x = cutoff, y = genesContaminating)) +
     ggplot2::geom_point() +
-    ggplot2::ggtitle("number of genes to correct") +
+    ggplot2::ggtitle("Number of genes to correct") +
     ggplot2::xlab("empty droplet UMI cutoff") +
     ggplot2::ylab("Genes identified as contamination") +
     theme_clean
   
-  # use patchwork (already used elsewhere in the app) -> no grid.arrange needed
   patchwork::wrap_plots(p_top, p_mid, p_bot, ncol = 1)
 }
 
+# -----------------------------
+# View counter helper
+# -----------------------------
+increment_count <- local({
+  path <- "www/view_counter.txt"
+  function() {
+    n <- 0L
+    if (file.exists(path)) {
+      x <- suppressWarnings(as.integer(readLines(path, warn = FALSE)[1]))
+      if (is.finite(x)) n <- x
+    }
+    n <- n + 1L
+    writeLines(as.character(n), path, useBytes = TRUE)
+    n
+  }
+})

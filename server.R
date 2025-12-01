@@ -1,3 +1,4 @@
+
 # -----------------------------
 # Server
 # -----------------------------
@@ -15,7 +16,11 @@ server <- function(input, output, session) {
   
   output$download_sess <- downloadHandler(
     filename = function() {
-      paste0("SCARR-Vis_session-info_", format(Sys.time(), "%Y-%m-%d_%H-%M-%S"), ".txt")
+      paste0(
+        "SCARR-Vis_session-info_",
+        format(Sys.time(), "%Y-%m-%d_%H-%M-%S"),
+        ".txt"
+      )
     },
     content = function(file) {
       writeLines(sess_txt(), con = file, useBytes = TRUE)
@@ -40,7 +45,7 @@ server <- function(input, output, session) {
   }, once = TRUE)
   
   
-  #hide tab
+  # hide analysis tabs until Run is clicked
   analysis_tabs <- c(
     "QC (Pre)",
     "Estimation",
@@ -68,7 +73,7 @@ server <- function(input, output, session) {
       analysis_tabs,
       function(tb) shinyjs::show(selector = sprintf('a[data-value="%s"]', tb))
     )
-    # Optionally jump to QC (Pre) after run:
+    # jump to QC (Pre) after run:
     updateTabsetPanel(session, "tabs", selected = "QC (Pre)")
   }, ignoreInit = TRUE)
   
@@ -86,7 +91,9 @@ server <- function(input, output, session) {
   hard_reset <- function(session, msg = "Resetting the app…") {
     showNotification(msg, type = "error", duration = 3)
     later::later(function() {
-      if (is.function(session$reload)) session$reload() else {
+      if (is.function(session$reload)) {
+        session$reload()
+      } else {
         session$sendCustomMessage("force-reload", TRUE)
       }
     }, 2.5)
@@ -153,7 +160,7 @@ server <- function(input, output, session) {
     downloadBttn("dl_adjusted_data", label)
   })
   
-  # Data source toggle
+  # Data source toggle (example vs upload)
   observeEvent(input$data_mode, ignoreInit = TRUE, {
     if (identical(input$data_mode, "example")) {
       clear_data()
@@ -224,7 +231,9 @@ server <- function(input, output, session) {
     log_msg("FILTERED loaded:", nrow(rv$filt), "genes x", ncol(rv$filt), "cells")
   }, ignoreInit = TRUE)
   
+  # -----------------------------
   # Main run
+  # -----------------------------
   observeEvent(input$run, {
     if (identical(input$data_mode, "upload") &&
         (is.null(input$raw$datapath) || is.null(input$filt$datapath))) {
@@ -251,9 +260,12 @@ server <- function(input, output, session) {
       if (any(looks_ens)) {
         log_msg("Converting Ensembl IDs to symbols via biomaRt for", input$species_genome)
         conv <- tryCatch(map_ensembl_to_symbol(rn, input$species_genome), error=function(e) rn)
-        rownames(raw)  <- conv; rownames(filt) <- conv
+        rownames(raw)  <- conv
+        rownames(filt) <- conv
       } else if (any(grepl("_", rn))) {
-        conv <- sub("^.*_", "", rn); rownames(raw) <- conv; rownames(filt) <- conv
+        conv <- sub("^.*_", "", rn)
+        rownames(raw)  <- conv
+        rownames(filt) <- conv
       }
     }
     
@@ -273,11 +285,24 @@ server <- function(input, output, session) {
     seu <- Seurat::CreateSeuratObject(counts = filt, min.cells = input$min_cells %||% 3)
     defs <- species_defaults(input$species_genome)
     seu[["percent.mt"]] <- PercentageFeatureSet(seu, pattern = defs$mito_regex)
-    seu <- NormalizeData(seu); seu <- FindVariableFeatures(seu); seu <- ScaleData(seu, verbose=FALSE)
+    seu <- NormalizeData(seu)
+    seu <- FindVariableFeatures(seu)
+    seu <- ScaleData(seu, verbose=FALSE)
     seu <- RunPCA(seu, npcs=30, verbose=FALSE)
-    seu <- FindNeighbors(seu, dims=1:20); seu <- FindClusters(seu, resolution=0.5)
-    suppressWarnings({ if (ncol(seu) >= 50) seu <- tryCatch(RunUMAP(seu, dims=1:20), error=function(e) seu) })
-    suppressWarnings({ if (ncol(seu) >= 50) seu <- tryCatch(RunTSNE(seu, dims = 1:20, check_duplicates = FALSE), error = function(e) seu) })
+    seu <- FindNeighbors(seu, dims=1:20)
+    seu <- FindClusters(seu, resolution=0.5)
+    ## identities = seurat_clusters (not orig.ident)
+    if (!is.null(seu$seurat_clusters)) {
+      Seurat::Idents(seu) <- seu$seurat_clusters
+    }
+    suppressWarnings({
+      if (ncol(seu) >= 50)
+        seu <- tryCatch(RunUMAP(seu, dims=1:20), error=function(e) seu)
+    })
+    suppressWarnings({
+      if (ncol(seu) >= 50)
+        seu <- tryCatch(RunTSNE(seu, dims = 1:20, check_duplicates = FALSE), error = function(e) seu)
+    })
     rv$seu_pre <- seu
     
     log_msg("Decontamination method:", input$method)
@@ -302,7 +327,8 @@ server <- function(input, output, session) {
       
       sr <- c(as.numeric(input$soupRange[1]), as.numeric(input$soupRange[2]))
       if (!all(is.finite(sr))) sr <- c(1, 100)
-      sr[1] <- max(1, floor(sr[1])); sr[2] <- max(sr[1] + 1, ceiling(sr[2]))
+      sr[1] <- max(1, floor(sr[1]))
+      sr[2] <- max(sr[1] + 1, ceiling(sr[2]))
       
       tod_ok <- !is.null(sc$tod) && !is.null(dim(sc$tod)) && all(dim(sc$tod) > 0)
       toc_ok <- !is.null(sc$toc) && !is.null(dim(sc$toc)) && all(dim(sc$toc) > 0)
@@ -346,10 +372,14 @@ server <- function(input, output, session) {
         if (inherits(auto, "error")) {
           showNotification(paste("autoEstCont failed:", auto$message), type="error")
           log_msg("autoEstCont failed:", auto$message, "— falling back to ρ = 0.05 uniform.")
-          md <- sc$metaData; md$rho <- rep(0.05, nrow(md)); sc$metaData <- md
-          rv$auto <- NULL; rv$sc <- sc
+          md <- sc$metaData
+          md$rho <- rep(0.05, nrow(md))
+          sc$metaData <- md
+          rv$auto <- NULL
+          rv$sc   <- sc
         } else {
-          rv$auto <- auto; rv$sc <- auto
+          rv$auto <- auto
+          rv$sc   <- auto
         }
         rv$rho <- tryCatch(rv$sc$metaData$rho, error=function(...) NULL)
       } else {
@@ -363,6 +393,7 @@ server <- function(input, output, session) {
       }
       
       log_msg("Adjusting counts with SoupX::adjustCounts (defaults; integers rounded)...")
+      log_msg("Completed SoupX")
       adj <- tryCatch({ SoupX::adjustCounts(rv$sc, roundToInt = FALSE) }, error=function(e) e)
       if (inherits(adj, "error")) {
         showNotification(paste("adjustCounts failed:", adj$message), type="error")
@@ -406,16 +437,17 @@ server <- function(input, output, session) {
                       as.numeric(input$decontx_convergence %||% 0.001),
                       as.integer(input$decontx_iterLogLik %||% 10),
                       as.integer(input$decontx_varGenes %||% 5000)))
+      log_msg("Completed DecontX")
       dx <- tryCatch({
         celda::decontX(
           x = sce, z = z,
-          maxIter = as.integer(input$decontx_maxiter %||% 500),
-          delta = delta_vec,
-          estimateDelta  = isTRUE(input$decontx_estimateDelta),
-          convergence    = as.numeric(input$decontx_convergence %||% 0.001),
-          iterLogLik     = as.integer(input$decontx_iterLogLik %||% 10),
-          varGenes       = as.integer(input$decontx_varGenes %||% 5000),
-          verbose        = TRUE
+          maxIter       = as.integer(input$decontx_maxiter %||% 500),
+          delta         = delta_vec,
+          estimateDelta = isTRUE(input$decontx_estimateDelta),
+          convergence   = as.numeric(input$decontx_convergence %||% 0.001),
+          iterLogLik    = as.integer(input$decontx_iterLogLik %||% 10),
+          varGenes      = as.integer(input$decontx_varGenes %||% 5000),
+          verbose       = TRUE
         )
       }, error = function(e) e)
       if (inherits(dx, "error")) {
@@ -449,7 +481,6 @@ server <- function(input, output, session) {
         return()
       }
       
-      # --- collect parameters from UI ---
       empty_cutoff  <- as.integer(input$fastcar_empty_cutoff %||% 100L)
       contam_cutoff <- as.numeric(input$fastcar_contam_cutoff %||% 0.05)
       do_profile    <- isTRUE(input$fastcar_do_profile)
@@ -458,7 +489,6 @@ server <- function(input, output, session) {
       prof_by       <- as.integer(input$fastcar_profile_by %||% 10L)
       use_reco      <- isTRUE(input$fastcar_use_recommended)
       
-      #log_msg("Decontamination method: FastCAR")
       log_msg(sprintf(
         paste(
           "FastCAR parameters:",
@@ -470,12 +500,12 @@ server <- function(input, output, session) {
         prof_start, prof_stop, prof_by, use_reco
       ))
       
-      log_msg("Completed FastCAR ambient RNA correction...")
+      log_msg("Completed FastCAR")
       
       fc <- tryCatch(
         scarr_fastcar_wrapper(
-          raw,             # full_mat
-          filt,            # cell_mat
+          raw,
+          filt,
           empty_droplet_cutoff        = empty_cutoff,
           contamination_chance_cutoff = contam_cutoff,
           do_profile                  = do_profile,
@@ -505,8 +535,6 @@ server <- function(input, output, session) {
         stringsAsFactors = FALSE
       )
       
-      # make structure consistent with other methods so the reproducibility
-      # table/manual can read rv$sc$params
       rv$rho  <- NULL
       rv$auto <- NULL
       rv$sc   <- list(
@@ -522,8 +550,14 @@ server <- function(input, output, session) {
         ),
         fastcar_aux = fc$aux
       )
-       # ---- scCDC ----
+      
+      # ---- scCDC ----
     } else if (identical(input$method, "scCDC")) {
+      if (!requireNamespace("scCDC", quietly = TRUE)) {
+        showNotification("Package 'scCDC' is required for this method.", type = "error")
+        log_msg("scCDC aborted: package not available.")
+        return()
+      }
       seu <- rv$seu_pre
       if (is.null(seu) || is.null(seu$seurat_clusters)) {
         showNotification("scCDC needs clustered Seurat object; retry after QC (Pre) clustering.", type = "error")
@@ -543,14 +577,15 @@ server <- function(input, output, session) {
         "Running scCDC (restriction_factor=%.2f, min.cell=%d, percent.cutoff=%.2f) with out_path.plot=%s",
         restriction_factor, min_cell, percent_cutoff, out_dir
       ))
+      log_msg("Completed scCDC")
       
       GCGs <- tryCatch(
         scCDC::ContaminationDetection(
           seu,
           restriction_factor = restriction_factor,
-          min.cell = min_cell,
-          percent.cutoff = percent_cutoff,
-          out_path.plot = out_dir
+          min.cell           = min_cell,
+          percent.cutoff     = percent_cutoff,
+          out_path.plot      = out_dir
         ),
         error = function(e) e
       )
@@ -591,7 +626,6 @@ server <- function(input, output, session) {
         return()
       }
       gcg_genes <- unique(gcg_genes[gcg_genes %in% rownames(seu)])
-      if (!length(gcg_genes)) showNotification("scCDC: No GCGs matched feature names in object.", type = "warning")
       rv$sccdc_quant <- tryCatch(scCDC::ContaminationQuantification(seu, gcg_genes), error = function(e) NULL)
       
       seu_corr <- tryCatch(scCDC::ContaminationCorrection(seu, gcg_genes), error = function(e) e)
@@ -628,7 +662,9 @@ server <- function(input, output, session) {
     updateTabsetPanel(session, "tabs", selected = "QC (Pre)")
   })
   
+  # -----------------------------
   # Post-adjustment
+  # -----------------------------
   do_adjust_and_update <- function() {
     req(rv$seu_pre, rv$adj_counts)
     
@@ -647,11 +683,24 @@ server <- function(input, output, session) {
       return()
     }
     seu2[["percent.mt"]] <- PercentageFeatureSet(seu2, pattern = defs$mito_regex)
-    seu2 <- NormalizeData(seu2); seu2 <- FindVariableFeatures(seu2); seu2 <- ScaleData(seu2, verbose=FALSE)
+    seu2 <- NormalizeData(seu2)
+    seu2 <- FindVariableFeatures(seu2)
+    seu2 <- ScaleData(seu2, verbose=FALSE)
     seu2 <- RunPCA(seu2, npcs=30, verbose=FALSE)
-    seu2 <- FindNeighbors(seu2, dims=1:20); seu2 <- FindClusters(seu2, resolution=0.5)
-    suppressWarnings({ if (ncol(seu2) >= 50) seu2 <- tryCatch(RunUMAP(seu2, dims=1:20), error=function(e) seu2) })
-    suppressWarnings({ if (ncol(seu2) >= 50) seu2 <- tryCatch(RunTSNE(seu2, dims = 1:20, check_duplicates = FALSE), error = function(e) seu2) })
+    seu2 <- FindNeighbors(seu2, dims=1:20)
+    seu2 <- FindClusters(seu2, resolution=0.5)
+    ## identities = seurat_clusters here as well
+    if (!is.null(seu2$seurat_clusters)) {
+      Seurat::Idents(seu2) <- seu2$seurat_clusters
+    }
+    suppressWarnings({
+      if (ncol(seu2) >= 50)
+        seu2 <- tryCatch(RunUMAP(seu2, dims=1:20), error=function(e) seu2)
+    })
+    suppressWarnings({
+      if (ncol(seu2) >= 50)
+        seu2 <- tryCatch(RunTSNE(seu2, dims = 1:20, check_duplicates = FALSE), error = function(e) seu2)
+    })
     rv$seu_post <- seu2
     
     pre_counts  <- tapply(rv$seu_pre$seurat_clusters,  rv$seu_pre$seurat_clusters,  length)
@@ -780,6 +829,7 @@ server <- function(input, output, session) {
       ggtitle("Estimation: rho vs nUMIs") +
       scale_x_log10() + xlab("nUMIs (log10)") + ylab("rho") + theme_clean
   })
+  
   plot_auto_plot <- reactive({
     req(rv$auto, input$do_plot)
     md <- rv$auto$metaData
@@ -1061,7 +1111,6 @@ server <- function(input, output, session) {
     aux <- tryCatch(rv$sc$fastcar_aux, error = function(e) NULL)
     amb <- tryCatch(aux$amb_profile,    error = function(e) NULL)
     if (is.null(amb)) return(NULL)
-    # this returns a patchwork object built in helpers
     fastcar_ambient_profile_plot(amb)
   })
   
@@ -1093,13 +1142,13 @@ server <- function(input, output, session) {
   # Heatmap + download
   heatmap_plot_obj <- reactive({
     req(rv$seu_pre, rv$seu_post)
-    src <- input$heatmap_source %||% "post"
+    src  <- input$heatmap_source %||% "post"
     topn <- as.integer(input$heatmap_topn %||% 50)
     topn <- max(10L, min(200L, topn))
-    obj <- if (identical(src, "pre")) rv$seu_pre else rv$seu_post
+    obj  <- if (identical(src, "pre")) rv$seu_pre else rv$seu_post
     feats <- head(VariableFeatures(obj), topn)
     if (length(feats) < 10) {
-      obj <- FindVariableFeatures(obj)
+      obj   <- FindVariableFeatures(obj)
       feats <- head(VariableFeatures(obj), topn)
     }
     suppressWarnings(DoHeatmap(obj, features = feats, group.by = "seurat_clusters"))
@@ -1278,53 +1327,108 @@ server <- function(input, output, session) {
     }
   )
   
+  # output$dl_adjusted_rds <- downloadHandler(
+  #   filename = function() sprintf("%s_seurat_adjusted_%s.rds",
+  #                                 tolower(input$method %||% "soupx"),
+  #                                 format(Sys.Date(), "%Y%m%d")),
+  #   content = function(file) {
+  #     req(rv$seu_post)
+  #     saveRDS(rv$seu_post, file)
+  #   }
+  # )
+  
   output$dl_adjusted_rds <- downloadHandler(
-    filename = function() sprintf("%s_seurat_adjusted_%s.rds",
-                                  tolower(input$method %||% "soupx"),
-                                  format(Sys.Date(), "%Y%m%d")),
+    filename = function() sprintf(
+      "%s_seurat_adjusted_%s.rds",
+      tolower(input$method %||% "soupx"),
+      format(Sys.Date(), "%Y%m%d")
+    ),
     content = function(file) {
       req(rv$seu_post)
-      saveRDS(rv$seu_post, file)
+      
+      # make a copy so we don't change rv$seu_post in the app
+      seu_save <- rv$seu_post
+      
+      # if orig.ident exists, set Idents to that before saving
+      if ("orig.ident" %in% colnames(seu_save@meta.data)) {
+        Seurat::Idents(seu_save) <- seu_save$orig.ident
+      }
+      
+      saveRDS(seu_save, file)
     }
   )
   
+  
+  # *** IMPORTANT: cleaned .h5 / MTX zip download ***
   output$dl_adjusted_data <- downloadHandler(
     filename = function() {
       tag <- tolower(input$method %||% "soupx")
-      if (identical(rv$upload_type, "h5"))
+      if (identical(rv$upload_type, "h5")) {
         sprintf("%s_adjusted_%s.h5", tag, format(Sys.Date(), "%Y%m%d"))
-      else
-        sprintf("%s_adjusted_mtx_%s.zip", tag, format(Sys.Date(), "%Y%m%d"))
-    },
-    content = function(file) {
-      req(rv$adj_counts, rv$seu_post)
-      if (identical(rv$upload_type, "h5") &&
-          requireNamespace("rhdf5", quietly = TRUE)) {
-        write_10x_h5(rv$adj_counts, file)
       } else {
-        td <- tempfile(pattern = "mtx_"); dir.create(td)
-        con_mtx <- gzfile(file.path(td, "matrix.mtx.gz"), open = "wt")
-        on.exit(try(close(con_mtx), silent = TRUE), add = TRUE)
-        Matrix::writeMM(rv$adj_counts, con_mtx); close(con_mtx)
-        con_bar <- gzfile(file.path(td, "barcodes.tsv.gz"), open = "wt")
-        on.exit(try(close(con_bar), silent = TRUE), add = TRUE)
-        writeLines(colnames(rv$adj_counts), con_bar, sep = "\n"); close(con_bar)
-        feat <- data.frame(
-          gene_id      = rownames(rv$adj_counts),
-          gene_name    = rownames(rv$adj_counts),
-          feature_type = "Gene Expression"
+        sprintf("%s_adjusted_mtx_%s.zip", tag, format(Sys.Date(), "%Y%m%d"))
+      }
+    },
+    contentType = "application/octet-stream",  # always binary
+    content = function(file) {
+      req(rv$adj_counts)
+      
+      mat <- rv$adj_counts
+      if (!methods::is(mat, "dgCMatrix")) {
+        mat <- as(mat, "dgCMatrix")
+      }
+      
+      ## make sure 10x-like dimnames exist
+      if (is.null(rownames(mat))) {
+        if (!is.null(rv$filt) && !is.null(rownames(rv$filt))) {
+          rownames(mat) <- rownames(rv$filt)[seq_len(nrow(mat))]
+        } else {
+          rownames(mat) <- sprintf("gene_%s", seq_len(nrow(mat)))
+        }
+      }
+      if (is.null(colnames(mat))) {
+        if (!is.null(rv$filt) && !is.null(colnames(rv$filt))) {
+          colnames(mat) <- colnames(rv$filt)[seq_len(ncol(mat))]
+        } else {
+          colnames(mat) <- sprintf("cell_%s", seq_len(ncol(mat)))
+        }
+      }
+      
+      if (identical(rv$upload_type, "h5")) {
+        ## ---- H5 cleaned output ----
+        if (!requireNamespace("rhdf5", quietly = TRUE)) {
+          showNotification("Package 'rhdf5' is required to write .h5 output.", type = "error")
+          stop("rhdf5 not installed")
+        }
+        write_10x_h5(mat, file)
+        
+      } else {
+        ## ---- MTX zip cleaned output ----
+        if (!requireNamespace("zip", quietly = TRUE)) {
+          showNotification("Package 'zip' is required for MTX zip download.", type = "error")
+          stop("zip package not installed")
+        }
+        
+        td <- tempfile(pattern = "mtx_")
+        dir.create(td, recursive = TRUE, showWarnings = FALSE)
+        
+        # write matrix.mtx(.gz), barcodes.tsv(.gz), features.tsv(.gz)
+        write_cleaned_10x(mat, td, gzip = TRUE)
+        
+        oldwd <- getwd()
+        on.exit(setwd(oldwd), add = TRUE)
+        setwd(td)
+        
+        # make a proper zip archive
+        zip::zip(
+          zipfile = file,
+          files   = c("matrix.mtx.gz", "barcodes.tsv.gz", "features.tsv.gz")
         )
-        con_feat <- gzfile(file.path(td, "features.tsv.gz"), open = "wt")
-        on.exit(try(close(con_feat), silent = TRUE), add = TRUE)
-        write.table(feat, file = con_feat, sep = "\t", quote = FALSE,
-                    col.names = FALSE, row.names = FALSE, eol = "\n")
-        close(con_feat)
-        oldwd <- setwd(td); on.exit(setwd(oldwd), add = TRUE)
-        zip::zip(zipfile = file,
-                 files = c("matrix.mtx.gz", "barcodes.tsv.gz", "features.tsv.gz"))
       }
     }
   )
+  
+  
   
   output$log  <- renderText(paste(rv$log, collapse = "\n"))
   
@@ -1377,7 +1481,7 @@ server <- function(input, output, session) {
   open_simple_download(
     reactive(input$open_dl_fastcar_profile), "dl_fastcar_profile",
     "FastCAR: ambient profile",
-    fastcar_profile_obj,   # this is already a function returning the plot
+    fastcar_profile_obj,
     "fastcar_ambient_profile"
   )
   
