@@ -439,8 +439,14 @@ ui <- navbarPage(
           
           tabPanel(
             "Cluster counts (Pre vs post)",
-            fluidRow(column(12, downloadBttn("dl_cluster_counts_csv", "Download Cluster Counts (CSV)"))),
+            fluidRow(
+              #column(6, downloadBttn("dl_total_cell_counts_csv", "Download Total Cell Counts (CSV)")),
+              column(6, downloadBttn("dl_cluster_counts_csv", "Download Cluster Counts (CSV)"))
+            ),
             br(),
+            #h3("Total cell count before and after ambinent RNA removal"),
+            #DTOutput("total_cell_counts_dt") %>% withSpinner(type = 4),
+            #br(),
             h3("Cell counts table before and after ambinent RNA removal"),
             DTOutput("cluster_counts_dt") %>% withSpinner(type = 4),
             br(),
@@ -715,6 +721,13 @@ ui <- navbarPage(
             em("Figure 5. Cluster counts per cluster (pre vs post).")
           )
         ),
+        div(
+          style = "text-align:center; margin-bottom:20px;",
+          tags$img(src = "images/5.jpg", class = "img-responsive", style = "max-width:100%;"),
+          tags$small(
+            em("Figure 6. Bar plot with Cluster counts  (pre vs post).")
+          )
+        ),
         
         h4("5. Cell table"),
         p(
@@ -726,7 +739,7 @@ ui <- navbarPage(
           style = "text-align:center; margin-bottom:20px;",
           tags$img(src = "images/table_6.jpg", class = "img-responsive", style = "max-width:100%;"),
           tags$small(
-            em("Figure 6. Cell-level summary table.")
+            em("Figure 7. Cell-level summary table.")
           )
         ),
         
@@ -739,7 +752,7 @@ ui <- navbarPage(
           style = "text-align:center; margin-bottom:20px;",
           tags$img(src = "images/table_7.jpg", class = "img-responsive", style = "max-width:100%;"),
           tags$small(
-            em("Figure 7. Top genes affected by ambient RNA (pre vs post).")
+            em("Figure 8. Top genes affected by ambient RNA (pre vs post).")
           )
         ),
         
@@ -757,7 +770,7 @@ ui <- navbarPage(
           style = "text-align:center; margin-bottom:20px;",
           tags$img(src = "images/8.jpg", class = "img-responsive", style = "max-width:100%;"),
           tags$small(
-            em("Figure 8. UMAP and tSNE embeddings for GSM7681687 before and after correction.")
+            em("Figure 9. UMAP and tSNE embeddings for GSM7681687 before and after correction.")
           )
         ),
         
@@ -772,7 +785,7 @@ ui <- navbarPage(
           style = "text-align:center; margin-bottom:20px;",
           tags$img(src = "images/9.jpg", class = "img-responsive", style = "max-width:100%;"),
           tags$small(
-            em("Figure 9. Heatmaps of top variable genes for pre- and post-correction data.")
+            em("Figure 10. Heatmaps of top variable genes for pre- and post-correction data.")
           )
         ),
         
@@ -787,7 +800,7 @@ ui <- navbarPage(
           style = "text-align:center; margin-bottom:20px;",
           tags$img(src = "images/10.jpg", class = "img-responsive", style = "max-width:100%;"),
           tags$small(
-            em("Figure 10. Example feature plots for FTH1 (Pre and Post).")
+            em("Figure 11. Example feature plots for FTH1 (Pre and Post).")
           )
         ),
         
@@ -804,7 +817,7 @@ ui <- navbarPage(
           style = "text-align:center; margin-bottom:20px;",
           tags$img(src = "images/table_1.jpg", class = "img-responsive", style = "max-width:100%;"),
           tags$small(
-            em("Figure 11. Reproducibility summary table with selected parameters.")
+            em("Figure 12. Reproducibility summary table with selected parameters.")
           )
         ),
         

@@ -638,7 +638,7 @@ server <- function(input, output, session) {
       if ("Corrected" %in% names(seu_corr@assays)) {
         DefaultAssay(seu_corr) <- "Corrected"
         corrected <- tryCatch(
-          Seurat::GetAssayData(seu_corr, slot = "counts", assay = "Corrected"),
+          Seurat::GetAssayData(seu_corr, layer = "counts", assay = "Corrected"),
           error=function(e) NULL
         )
       }
@@ -705,9 +705,8 @@ server <- function(input, output, session) {
     
     pre_counts  <- tapply(rv$seu_pre$seurat_clusters,  rv$seu_pre$seurat_clusters,  length)
     post_counts <- tapply(rv$seu_post$seurat_clusters, rv$seu_post$seurat_clusters, length)
-    pre_counts  <- pre_counts[order(names(pre_counts))]
-    post_counts <- post_counts[order(names(post_counts))]
-    all_clusters <- sort(unique(c(names(pre_counts), names(post_counts))))
+    # Ensure numeric cluster ordering: 0, 1, 2, ... 10, 11 (not 0, 1, 10, 11, ...)
+    all_clusters <- sort_clusters(c(names(pre_counts), names(post_counts)))
     cluster_counts_df <- data.frame(
       cluster = all_clusters,
       n_pre   = as.integer(pre_counts [all_clusters]),
@@ -897,7 +896,8 @@ server <- function(input, output, session) {
   plot_cluster_counts_bar <- reactive({
     if (is.null(rv$cluster_counts_df) || !nrow(rv$cluster_counts_df)) return(NULL)
     df <- rv$cluster_counts_df[, c("cluster", "n_pre", "n_post")]
-    df$cluster <- factor(df$cluster, levels = sort(unique(df$cluster)))
+    df$cluster <- as.character(df$cluster)
+    df$cluster <- factor(df$cluster, levels = sort_clusters(df$cluster))
     long <- reshape2::melt(df, id.vars = "cluster", variable.name = "set", value.name = "n")
     ggplot(long, aes(x = cluster, y = n, fill = set)) +
       geom_col(position = position_dodge(width = 0.8)) +
@@ -1034,7 +1034,7 @@ server <- function(input, output, session) {
     req(rv$seu_pre, rv$adj_counts)
     genes <- sccdc_gcgs_genes()
     if (!length(genes)) return(NULL)
-    pre_counts  <- Seurat::GetAssayData(rv$seu_pre,  slot = "counts", assay = DefaultAssay(rv$seu_pre))
+    pre_counts  <- Seurat::GetAssayData(rv$seu_pre,  layer = "counts", assay = DefaultAssay(rv$seu_pre))
     post_counts <- rv$adj_counts
     genes <- intersect(genes, intersect(rownames(pre_counts), rownames(post_counts)))
     if (!length(genes)) return(NULL)
@@ -1250,8 +1250,8 @@ server <- function(input, output, session) {
   # Tables & downloads
   output$top_genes <- renderDT({
     req(rv$seu_pre, rv$seu_post)
-    pre_counts  <- Seurat::GetAssayData(rv$seu_pre,  slot = "counts", assay = DefaultAssay(rv$seu_pre))
-    post_counts <- Seurat::GetAssayData(rv$seu_post, slot = "counts", assay = DefaultAssay(rv$seu_post))
+    pre_counts  <- Seurat::GetAssayData(rv$seu_pre,  layer = "counts", assay = DefaultAssay(rv$seu_pre))
+    post_counts <- Seurat::GetAssayData(rv$seu_post, layer = "counts", assay = DefaultAssay(rv$seu_post))
     if (nrow(pre_counts) == 0 || ncol(pre_counts) == 0 ||
         nrow(post_counts) == 0 || ncol(post_counts) == 0) {
       return(datatable(
@@ -1281,20 +1281,54 @@ server <- function(input, output, session) {
               options = list(pageLength = 10, scrollX = TRUE),
               rownames = FALSE, selection = "none")
   })
+
+  # Total cell count (Pre vs Post)
+  total_cell_counts_df <- reactive({
+    req(rv$seu_pre, rv$seu_post)
+    data.frame(
+      total_pre    = ncol(rv$seu_pre),
+      total_post   = ncol(rv$seu_post),
+      total_change = ncol(rv$seu_post) - ncol(rv$seu_pre),
+      stringsAsFactors = FALSE
+    )
+  })
+
+  # output$total_cell_counts_dt <- renderDT({
+  #   df <- total_cell_counts_df()
+  #   datatable(
+  #     df,
+  #     options = list(
+  #       dom = 't',
+  #       paging = FALSE,
+  #       searching = FALSE,
+  #       info = FALSE,
+  #       scrollX = TRUE
+  #     ),
+  #     rownames = FALSE,
+  #     selection = "none"
+  #   )
+  # })
   
   output$cluster_counts_dt <- renderDT({
     req(rv$cluster_counts_df)
-    datatable(rv$cluster_counts_df,
-              options = list(pageLength = 10, scrollX = TRUE),
-              rownames = FALSE, selection = "none")
+    df <- rv$cluster_counts_df
+    df$cluster <- as.character(df$cluster)
+    lev <- sort_clusters(df$cluster)
+    df <- df[order(factor(df$cluster, levels = lev)), , drop = FALSE]
+    datatable(
+      df,
+      options = list(pageLength = 10, scrollX = TRUE),
+      rownames = FALSE,
+      selection = "none"
+    )
   })
   
   output$dl_topgenes_csv <- downloadHandler(
     filename = function() sprintf("top_genes_%s.csv", format(Sys.Date(), "%Y%m%d")),
     content = function(file) {
       req(rv$seu_pre, rv$seu_post)
-      pre_counts  <- Seurat::GetAssayData(rv$seu_pre,  slot = "counts", assay = DefaultAssay(rv$seu_pre))
-      post_counts <- Seurat::GetAssayData(rv$seu_post, slot = "counts", assay = DefaultAssay(rv$seu_post))
+      pre_counts  <- Seurat::GetAssayData(rv$seu_pre,  layer = "counts", assay = DefaultAssay(rv$seu_pre))
+      post_counts <- Seurat::GetAssayData(rv$seu_post, layer = "counts", assay = DefaultAssay(rv$seu_post))
       if (nrow(pre_counts) == 0 || nrow(post_counts) == 0)
         stop("Counts are empty.")
       pre_sum  <- Matrix::rowSums(pre_counts)
@@ -1318,12 +1352,23 @@ server <- function(input, output, session) {
       utils::write.csv(rv$cells_df, file, row.names = FALSE)
     }
   )
+
+  # output$dl_total_cell_counts_csv <- downloadHandler(
+  #   filename = function() sprintf("total_cell_counts_%s.csv", format(Sys.Date(), "%Y%m%d")),
+  #   content = function(file) {
+  #     utils::write.csv(total_cell_counts_df(), file, row.names = FALSE)
+  #   }
+  # )
   
   output$dl_cluster_counts_csv <- downloadHandler(
     filename = function() sprintf("cluster_counts_%s.csv", format(Sys.Date(), "%Y%m%d")),
     content = function(file) {
       req(rv$cluster_counts_df)
-      utils::write.csv(rv$cluster_counts_df, file, row.names = FALSE)
+      df <- rv$cluster_counts_df
+      df$cluster <- as.character(df$cluster)
+      lev <- sort_clusters(df$cluster)
+      df <- df[order(factor(df$cluster, levels = lev)), , drop = FALSE]
+      utils::write.csv(df, file, row.names = FALSE)
     }
   )
   
