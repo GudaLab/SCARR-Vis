@@ -1,5 +1,18 @@
 `%||%` <- function(a, b) if (is.null(a)) b else a
 
+# Natural (numeric) ordering for Seurat cluster labels.
+# Ensures: 0, 1, 2, ..., 10, 11 (instead of 0, 1, 10, 11, ...)
+sort_clusters <- function(x) {
+  u <- unique(as.character(x))
+  suppressWarnings(num <- as.integer(u))
+  if (all(!is.na(num))) {
+    return(u[order(num)])
+  }
+  # Mixed labels: numeric-looking first (in numeric order), then the rest.
+  ok <- !is.na(num)
+  c(u[ok][order(num[ok])], sort(u[!ok]))
+}
+
 # -----------------------------
 # Helpers
 # -----------------------------
