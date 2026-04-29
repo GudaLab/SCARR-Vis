@@ -61,7 +61,7 @@ ui <- navbarPage(
         h4("Compare results"),
         tags$li("Check QC (Pre) vs QC (Post), Estimation, Cluster Counts (Pre vs Post), UMAP (Pre vs Post), Top Genes, and the Cells table."),
         h4("Outputs and Visualization"),
-        tags$li("Download publication-quality plots in seven formats: JPG, TIFF, PDF, SVG, BMP, EPS, and PS. Summary tables are also generated in .csv format for easy visualization and download, cleaned Seurat/SCE objects, summaries, and a zip bundle."),
+        tags$li("Each figure and table can be downloaded individually with the selected dimensions, or the user can click the Bulk Download option to download all publication-quality plots in JPG, TIFF, PDF, SVG, PNG, BMP, EPS, or PS format, along with summary tables in .csv format. The user can also download cleaned Seurat/SCE objects, summaries, .h5 files, matrix/barcode/feature files based on the input format, or a complete ZIP bundle containing all available outputs."),
         hr(),
         h4("Tips"),
         tags$ul(
@@ -801,12 +801,7 @@ ui <- navbarPage(
           )
         ),
         hr(),
-        h3("Download option"),
-        p(
-          "Each figure and table can be downloaded individually with the selected dimensions, or the user can click the Bulk Download option to download all figures in .jpg, .tiff, .pdf, .svg, .png, .bmp, .eps, or .ps format and all tables in .csv format. The user can also download the cleaned file as a Seurat object, an .h5 file, or in matrix, barcode, and feature format, based on the input format."
-        ),
-        hr(),
-        h3("11. Reproducibility and Session Info"),
+        h3("10. Reproducibility and Session Info"),
         p(
           "SCARR-Vis provides a reproducibility summary and full R session information. ",
           "The reproducibility table records the selected method, key parameter values, ",
