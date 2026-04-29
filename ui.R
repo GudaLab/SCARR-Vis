@@ -292,7 +292,10 @@ ui <- navbarPage(
               downloadBttn("dl_adjusted_rds", "Download Seurat (RDS)"),
               br(),
               br(),
-              uiOutput("dl_adjusted_ui")
+              uiOutput("dl_adjusted_ui"),
+              br(),
+              br(),
+              actionBttn("open_bulk_download", "Bulk Download Tables + Images", style = "unite", color = "primary", icon = icon("file-archive"))
             )
           ),
           
@@ -524,16 +527,10 @@ ui <- navbarPage(
             plotOutput("featplot_combined", height = 600) %>% withSpinner(type = 4)
           ),
           
-          tabPanel(
-            "Session Info",
-            tags$h4("R Session info"),
-            downloadBttn("download_sess", "Download session-info.txt"),
-            br(),
-            withSpinner(verbatimTextOutput("sess"), type=4)
-          )
-        )
-      )
-    )
+          
+        ),
+      ),
+    ),
   ),
   
   tabPanel(
@@ -803,9 +800,13 @@ ui <- navbarPage(
             em("Figure 11. Example feature plots for FTH1 (Pre and Post).")
           )
         ),
-        
         hr(),
-        h3("10. Reproducibility and Session Info"),
+        h3("Download option"),
+        p(
+          "Each figure and table can be downloaded individually with the selected dimensions, or the user can click the Bulk Download option to download all figures in .jpg, .tiff, .pdf, .svg, .png, .bmp, .eps, or .ps format and all tables in .csv format. The user can also download the cleaned file as a Seurat object, an .h5 file, or in matrix, barcode, and feature format, based on the input format."
+        ),
+        hr(),
+        h3("11. Reproducibility and Session Info"),
         p(
           "SCARR-Vis provides a reproducibility summary and full R session information. ",
           "The reproducibility table records the selected method, key parameter values, ",
@@ -1010,8 +1011,15 @@ ui <- navbarPage(
           "SCARR-Vis pipeline on the bundled GSM7681687 example data < 5000 cells (SoupX/DecontX/scCDC/FastCAR, ",
           "plus QC, clustering, UMAP/TSNE, and plots) usually completes in a few minutes per method (roughly 2–5 minutes)."
         ),
-      )
-    )
-  )
+      ),
+    ),
+  ),
+  tabPanel(
+            "Session Info",
+            tags$h4("R Session info"),
+            downloadBttn("download_sess", "Download session-info.txt"),
+            br(),
+            withSpinner(verbatimTextOutput("sess"), type=4)
+          ),
   
 )

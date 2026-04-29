@@ -55,8 +55,7 @@ server <- function(input, output, session) {
     "Top Genes",
     "UMAP/TSNE (Pre vs Post)",
     "Heatmap (Pre vs Post)",
-    "Feature Plot (Pre vs Post)",
-    "Session Info"
+    "Feature Plot (Pre vs Post)"
   )
   
   # Hide analysis tabs on initial load
@@ -66,17 +65,6 @@ server <- function(input, output, session) {
       function(tb) shinyjs::hide(selector = sprintf('a[data-value="%s"]', tb))
     )
   })
-  
-  # Show all analysis tabs after Run is clicked
-  observeEvent(input$run, {
-    lapply(
-      analysis_tabs,
-      function(tb) shinyjs::show(selector = sprintf('a[data-value="%s"]', tb))
-    )
-    # jump to QC (Pre) after run:
-    updateTabsetPanel(session, "tabs", selected = "QC (Pre)")
-  }, ignoreInit = TRUE)
-  
   
   # ---- upload validators + reset ----
   is_valid_10x <- function(fname, kind = c("raw","filtered")) {
@@ -89,6 +77,13 @@ server <- function(input, output, session) {
   same_ext <- function(a, b) tools::file_ext(a) == tools::file_ext(b)
   
   hard_reset <- function(session, msg = "Resetting the app…") {
+    set_analysis_status(
+      state = "error",
+      label = "Upload error",
+      detail = msg,
+      progress = 0,
+      mark_end = TRUE
+    )
     showNotification(msg, type = "error", duration = 3)
     later::later(function() {
       if (is.function(session$reload)) {
@@ -107,8 +102,155 @@ server <- function(input, output, session) {
     decontx_sce=NULL,
     GCGs=NULL, sccdc_quant=NULL,
     scCDC_pdf_abs = NULL,
-    scCDC_pdf_url = NULL
+    scCDC_pdf_url = NULL,
+    analysis_state = "idle",
+    analysis_label = "Waiting for data",
+    analysis_detail = "Upload raw and filtered matrices, or choose the example dataset, then click Run.",
+    analysis_progress = 0,
+    analysis_started_at = NULL,
+    analysis_finished_at = NULL,
+    featplot_autofill_gene = NULL
   )
+
+  analysis_progress <- new.env(parent = emptyenv())
+  analysis_progress$notifier <- NULL
+  analysis_progress$seq <- 0L
+
+  bulk_download_progress <- new.env(parent = emptyenv())
+  bulk_download_progress$notifier <- NULL
+  bulk_download_progress$seq <- 0L
+
+  fmt_status_time <- function(x) {
+    if (is.null(x) || length(x) == 0 || all(is.na(x))) return("Not started")
+    format(as.POSIXct(x), "%Y-%m-%d %H:%M:%S")
+  }
+
+  close_analysis_progress <- function(delay = 0, seq = analysis_progress$seq) {
+    later::later(function() {
+      if (!identical(analysis_progress$seq, seq)) return(invisible(NULL))
+      if (!is.null(analysis_progress$notifier)) {
+        try(analysis_progress$notifier$close(), silent = TRUE)
+        analysis_progress$notifier <- NULL
+      }
+    }, delay)
+  }
+
+  update_analysis_progress <- function(state, label, detail, progress) {
+    analysis_progress$seq <- analysis_progress$seq + 1L
+    current_seq <- analysis_progress$seq
+    progress_num <- max(0, min(100, round(suppressWarnings(as.numeric(progress)[1]) %||% 0)))
+    if (!is.finite(progress_num)) progress_num <- 0
+
+    if (identical(state, "idle")) {
+      close_analysis_progress(delay = 0, seq = current_seq)
+      return(invisible(NULL))
+    }
+
+    if (is.null(analysis_progress$notifier)) {
+      analysis_progress$notifier <- shiny::Progress$new(session, min = 0, max = 100, style = "notification")
+    }
+
+    title <- paste("SCARR-Vis -", label)
+    status_text <- switch(
+      state,
+      loading = "Loading",
+      ready = "Ready",
+      running = "Running",
+      completed = "Completed successfully",
+      error = "Failed",
+      "Status"
+    )
+    detail_text <- if (nzchar(detail %||% "")) paste(status_text, detail, sep = "\n") else status_text
+
+    analysis_progress$notifier$set(
+      message = title,
+      detail = detail_text,
+      value = progress_num
+    )
+
+    if (state %in% c("ready", "completed")) {
+      close_analysis_progress(delay = 1.2, seq = current_seq)
+    } else if (identical(state, "error")) {
+      close_analysis_progress(delay = 2.5, seq = current_seq)
+    }
+  }
+
+  close_bulk_download_progress <- function(delay = 0, seq = bulk_download_progress$seq) {
+    later::later(function() {
+      if (!identical(bulk_download_progress$seq, seq)) return(invisible(NULL))
+      if (!is.null(bulk_download_progress$notifier)) {
+        try(bulk_download_progress$notifier$close(), silent = TRUE)
+        bulk_download_progress$notifier <- NULL
+      }
+    }, delay)
+  }
+
+  update_bulk_download_progress <- function(state, label, detail, progress) {
+    bulk_download_progress$seq <- bulk_download_progress$seq + 1L
+    current_seq <- bulk_download_progress$seq
+    progress_num <- max(0, min(100, round(suppressWarnings(as.numeric(progress)[1]) %||% 0)))
+    if (!is.finite(progress_num)) progress_num <- 0
+
+    if (identical(state, "idle")) {
+      close_bulk_download_progress(delay = 0, seq = current_seq)
+      return(invisible(NULL))
+    }
+
+    if (is.null(bulk_download_progress$notifier)) {
+      bulk_download_progress$notifier <- shiny::Progress$new(session, min = 0, max = 100, style = "notification")
+    }
+
+    title <- paste("SCARR-Vis -", label)
+    status_text <- switch(
+      state,
+      preparing = "Preparing",
+      running = "Running",
+      packaging = "Preparing",
+      completed = "Completed successfully",
+      error = "Failed",
+      "Status"
+    )
+    detail_text <- if (nzchar(detail %||% "")) paste(status_text, detail, sep = "\n") else status_text
+
+    bulk_download_progress$notifier$set(
+      message = title,
+      detail = detail_text,
+      value = progress_num
+    )
+
+    if (identical(state, "completed")) {
+      close_bulk_download_progress(delay = 1.5, seq = current_seq)
+    } else if (identical(state, "error")) {
+      close_bulk_download_progress(delay = 2.5, seq = current_seq)
+    }
+  }
+
+  set_analysis_status <- function(state = rv$analysis_state,
+                                  label = rv$analysis_label,
+                                  detail = rv$analysis_detail,
+                                  progress = rv$analysis_progress,
+                                  mark_start = FALSE,
+                                  mark_end = FALSE) {
+    progress_num <- suppressWarnings(as.numeric(progress)[1])
+    if (!is.finite(progress_num)) progress_num <- 0
+    rv$analysis_state <- state
+    rv$analysis_label <- label
+    rv$analysis_detail <- detail
+    rv$analysis_progress <- max(0, min(100, round(progress_num)))
+    if (isTRUE(mark_start)) {
+      rv$analysis_started_at <- Sys.time()
+      rv$analysis_finished_at <- NULL
+    }
+    if (isTRUE(mark_end)) {
+      rv$analysis_finished_at <- Sys.time()
+    }
+    update_analysis_progress(
+      state = state,
+      label = label,
+      detail = detail,
+      progress = rv$analysis_progress
+    )
+  }
   
   # Example files
   ex_dir   <- file.path("www", "example", "GSM7681687")
@@ -119,7 +261,20 @@ server <- function(input, output, session) {
     rv$raw <- rv$filt <- rv$sc <- rv$auto <- rv$rho <- rv$adj_counts <- NULL
     rv$seu_pre <- rv$seu_post <- rv$cells_df <- rv$cluster_counts_df <- NULL
     rv$decontx_sce <- NULL
+    rv$GCGs <- rv$sccdc_quant <- NULL
+    rv$scCDC_pdf_abs <- rv$scCDC_pdf_url <- NULL
   }
+
+  # Show all analysis tabs only after a successful run produces results
+  observeEvent(rv$seu_post, {
+    req(rv$seu_post)
+    lapply(
+      analysis_tabs,
+      function(tb) shinyjs::show(selector = sprintf('a[data-value="%s"]', tb))
+    )
+    # jump to QC (Pre) after a completed analysis:
+    updateTabsetPanel(session, "tabs", selected = "QC (Pre)")
+  }, ignoreInit = TRUE)
   
   # Serve scCDC PDF reports
   reports_dir <- file.path(tempdir(), "scCDC_reports")
@@ -136,6 +291,19 @@ server <- function(input, output, session) {
   
   log_msg <- function(...) {
     rv$log <- c(rv$log, paste0(format(Sys.time(), "%H:%M:%S"), " - ", paste(..., collapse = " ")))
+  }
+
+  mark_analysis_error <- function(label, detail, progress = rv$analysis_progress,
+                                  notify_text = NULL, log_text = NULL) {
+    if (!is.null(log_text)) log_msg(log_text)
+    set_analysis_status(
+      state = "error",
+      label = label,
+      detail = detail,
+      progress = progress,
+      mark_end = TRUE
+    )
+    if (!is.null(notify_text)) showNotification(notify_text, type = "error")
   }
   
   # Reset to Status whenever method changes
@@ -164,7 +332,20 @@ server <- function(input, output, session) {
   observeEvent(input$data_mode, ignoreInit = TRUE, {
     if (identical(input$data_mode, "example")) {
       clear_data()
+      set_analysis_status(
+        state = "loading",
+        label = "Loading example data",
+        detail = "Reading the built-in raw and filtered matrices so the pipeline is ready to run.",
+        progress = 10
+      )
       if (!file.exists(ex_raw) || !file.exists(ex_filt)) {
+        set_analysis_status(
+          state = "error",
+          label = "Example data not found",
+          detail = paste0("Expected example files under ", normalizePath(ex_dir, mustWork = FALSE), "."),
+          progress = 0,
+          mark_end = TRUE
+        )
         showNotification(paste0(
           "Example files not found. Please ensure they exist at: ",
           normalizePath(ex_dir, mustWork = FALSE)
@@ -180,15 +361,37 @@ server <- function(input, output, session) {
       }, silent = TRUE)
       if (is.null(rv$raw) || is.null(rv$filt)) ok <- FALSE
       if (!ok) {
+        set_analysis_status(
+          state = "error",
+          label = "Example data failed to load",
+          detail = "The built-in matrices could not be read.",
+          progress = 0,
+          mark_end = TRUE
+        )
         showNotification("Failed to read example matrices.", type = "error")
         return()
       }
       log_msg("Example RAW loaded:",  nrow(rv$raw),  "genes x", ncol(rv$raw),  "cells")
       log_msg("Example FILTERED loaded:", nrow(rv$filt), "genes x", ncol(rv$filt), "cells")
+      set_analysis_status(
+        state = "ready",
+        label = "Data loaded",
+        detail = sprintf(
+          "Example data is ready: RAW %d genes x %d cells; FILTERED %d genes x %d cells. Click Run to start the analysis.",
+          nrow(rv$raw), ncol(rv$raw), nrow(rv$filt), ncol(rv$filt)
+        ),
+        progress = 20
+      )
     } else {
       clear_data()
       rv$upload_type <- NULL
       log_msg("Switched to Upload mode; please select your files.")
+      set_analysis_status(
+        state = "idle",
+        label = "Waiting for data",
+        detail = "Upload raw and filtered matrices, then click Run to begin the analysis.",
+        progress = 0
+      )
     }
   })
   
@@ -198,6 +401,12 @@ server <- function(input, output, session) {
     input$filt
   }, {
     req(input$raw, input$filt)
+    set_analysis_status(
+      state = "loading",
+      label = "Loading uploaded data",
+      detail = "Reading the uploaded raw and filtered matrices and validating their format.",
+      progress = 10
+    )
     raw_name  <- input$raw$name
     filt_name <- input$filt$name
     
@@ -229,14 +438,38 @@ server <- function(input, output, session) {
     
     log_msg("RAW loaded:",  nrow(rv$raw),  "genes x", ncol(rv$raw),  "cells")
     log_msg("FILTERED loaded:", nrow(rv$filt), "genes x", ncol(rv$filt), "cells")
+    set_analysis_status(
+      state = "ready",
+      label = "Data loaded",
+      detail = sprintf(
+        "Uploads are ready: RAW %d genes x %d cells; FILTERED %d genes x %d cells. Click Run to start the analysis.",
+        nrow(rv$raw), ncol(rv$raw), nrow(rv$filt), ncol(rv$filt)
+      ),
+      progress = 20
+    )
   }, ignoreInit = TRUE)
   
   # -----------------------------
   # Main run
   # -----------------------------
   observeEvent(input$run, {
+    set_analysis_status(
+      state = "running",
+      label = "Starting analysis",
+      detail = "Validating the selected data source and preparing the pipeline.",
+      progress = 25,
+      mark_start = TRUE
+    )
+    tryCatch({
     if (identical(input$data_mode, "upload") &&
         (is.null(input$raw$datapath) || is.null(input$filt$datapath))) {
+      set_analysis_status(
+        state = "error",
+        label = "Upload required",
+        detail = "Please upload both raw and filtered 10x matrices before running the analysis.",
+        progress = 0,
+        mark_end = TRUE
+      )
       showModal(modalDialog(
         title = "Upload required",
         "Please upload BOTH Raw and Filtered files from 10x matrices before running.",
@@ -248,11 +481,22 @@ server <- function(input, output, session) {
     req(rv$raw, rv$filt)
     common_genes <- intersect(rownames(rv$raw), rownames(rv$filt))
     if (length(common_genes) == 0) {
-      showNotification("No overlapping genes between raw and filtered matrices.", type="error")
+      mark_analysis_error(
+        label = "Analysis failed",
+        detail = "The raw and filtered matrices do not share any overlapping genes.",
+        progress = 25,
+        notify_text = "No overlapping genes between raw and filtered matrices."
+      )
       return()
     }
     raw  <- rv$raw [common_genes, , drop=FALSE]
     filt <- rv$filt[common_genes, , drop=FALSE]
+    set_analysis_status(
+      state = "running",
+      label = "Preparing matrices",
+      detail = "Harmonizing genes, optional symbol conversion, and duplicate handling.",
+      progress = 35
+    )
     
     if (isTRUE(input$use_gene_symbols)) {
       rn <- rownames(raw)
@@ -281,6 +525,12 @@ server <- function(input, output, session) {
       rownames(filt) <- make.unique(rownames(filt))
     }
     
+    set_analysis_status(
+      state = "running",
+      label = "Building pre-clean objects",
+      detail = "Creating the Seurat object and computing QC, clustering, UMAP, and t-SNE for the input data.",
+      progress = 50
+    )
     log_msg("Creating Seurat object (pre-clean) and computing clusters/UMAP/TSNE...")
     seu <- Seurat::CreateSeuratObject(counts = filt, min.cells = input$min_cells %||% 3)
     defs <- species_defaults(input$species_genome)
@@ -305,6 +555,12 @@ server <- function(input, output, session) {
     })
     rv$seu_pre <- seu
     
+    set_analysis_status(
+      state = "running",
+      label = paste("Running", input$method),
+      detail = sprintf("Applying %s to estimate contamination and generate corrected counts.", input$method),
+      progress = 70
+    )
     log_msg("Decontamination method:", input$method)
     
     # ---- SoupX ----
@@ -393,21 +649,31 @@ server <- function(input, output, session) {
       }
       
       log_msg("Adjusting counts with SoupX::adjustCounts (defaults; integers rounded)...")
-      log_msg("Completed SoupX")
       adj <- tryCatch({ SoupX::adjustCounts(rv$sc, roundToInt = FALSE) }, error=function(e) e)
       if (inherits(adj, "error")) {
-        showNotification(paste("adjustCounts failed:", adj$message), type="error")
-        log_msg("adjustCounts failed:", adj$message)
+        mark_analysis_error(
+          label = "SoupX failed",
+          detail = paste("SoupX could not adjust counts:", adj$message),
+          progress = 70,
+          notify_text = paste("adjustCounts failed:", adj$message),
+          log_text = paste("adjustCounts failed:", adj$message)
+        )
         return()
       }
       rv$adj_counts <- round_sparse(adj)
+      log_msg("Completed SoupX")
       
       # ---- DecontX ----
     } else if (identical(input$method, "DecontX")) {
       if (!requireNamespace("celda", quietly = TRUE) ||
           !requireNamespace("SingleCellExperiment", quietly = TRUE) ||
           !requireNamespace("SummarizedExperiment", quietly = TRUE)) {
-        showNotification("Packages 'celda', 'SingleCellExperiment', and 'SummarizedExperiment' are required for DecontX.", type = "error")
+        mark_analysis_error(
+          label = "DecontX unavailable",
+          detail = "Packages 'celda', 'SingleCellExperiment', and 'SummarizedExperiment' are required for DecontX.",
+          progress = 70,
+          notify_text = "Packages 'celda', 'SingleCellExperiment', and 'SummarizedExperiment' are required for DecontX."
+        )
         return()
       }
       log_msg("Preparing SingleCellExperiment for decontX...")
@@ -437,7 +703,6 @@ server <- function(input, output, session) {
                       as.numeric(input$decontx_convergence %||% 0.001),
                       as.integer(input$decontx_iterLogLik %||% 10),
                       as.integer(input$decontx_varGenes %||% 5000)))
-      log_msg("Completed DecontX")
       dx <- tryCatch({
         celda::decontX(
           x = sce, z = z,
@@ -451,10 +716,16 @@ server <- function(input, output, session) {
         )
       }, error = function(e) e)
       if (inherits(dx, "error")) {
-        showNotification(paste("decontX failed:", dx$message), type = "error")
-        log_msg("decontX failed:", dx$message)
+        mark_analysis_error(
+          label = "DecontX failed",
+          detail = paste("decontX returned an error:", dx$message),
+          progress = 70,
+          notify_text = paste("decontX failed:", dx$message),
+          log_text = paste("decontX failed:", dx$message)
+        )
         return()
       }
+      log_msg("Completed DecontX")
       rv$decontx_sce <- dx
       adj <- SummarizedExperiment::assay(dx, "decontXcounts")
       if (!inherits(adj, "dgCMatrix")) adj <- as(adj, "dgCMatrix")
@@ -476,8 +747,13 @@ server <- function(input, output, session) {
       # ---- FastCAR ----
     } else if (identical(input$method, "FastCAR")) {
       if (!fastcar_available()) {
-        showNotification("Package 'FastCAR' (and 'Matrix') is required for FastCAR decontamination.", type = "error")
-        log_msg("FastCAR aborted: package not available.")
+        mark_analysis_error(
+          label = "FastCAR unavailable",
+          detail = "Package 'FastCAR' (and 'Matrix') is required for FastCAR decontamination.",
+          progress = 70,
+          notify_text = "Package 'FastCAR' (and 'Matrix') is required for FastCAR decontamination.",
+          log_text = "FastCAR aborted: package not available."
+        )
         return()
       }
       
@@ -500,8 +776,6 @@ server <- function(input, output, session) {
         prof_start, prof_stop, prof_by, use_reco
       ))
       
-      log_msg("Completed FastCAR")
-      
       fc <- tryCatch(
         scarr_fastcar_wrapper(
           raw,
@@ -518,10 +792,16 @@ server <- function(input, output, session) {
       )
       
       if (inherits(fc, "error")) {
-        showNotification(paste("FastCAR failed:", fc$message), type = "error")
-        log_msg("FastCAR failed:", fc$message)
+        mark_analysis_error(
+          label = "FastCAR failed",
+          detail = paste("FastCAR returned an error:", fc$message),
+          progress = 70,
+          notify_text = paste("FastCAR failed:", fc$message),
+          log_text = paste("FastCAR failed:", fc$message)
+        )
         return()
       }
+      log_msg("Completed FastCAR")
       
       adj <- fc$corrected_counts
       if (!inherits(adj, "dgCMatrix")) adj <- as(adj, "dgCMatrix")
@@ -554,14 +834,24 @@ server <- function(input, output, session) {
       # ---- scCDC ----
     } else if (identical(input$method, "scCDC")) {
       if (!requireNamespace("scCDC", quietly = TRUE)) {
-        showNotification("Package 'scCDC' is required for this method.", type = "error")
-        log_msg("scCDC aborted: package not available.")
+        mark_analysis_error(
+          label = "scCDC unavailable",
+          detail = "Package 'scCDC' is required for this method.",
+          progress = 70,
+          notify_text = "Package 'scCDC' is required for this method.",
+          log_text = "scCDC aborted: package not available."
+        )
         return()
       }
       seu <- rv$seu_pre
       if (is.null(seu) || is.null(seu$seurat_clusters)) {
-        showNotification("scCDC needs clustered Seurat object; retry after QC (Pre) clustering.", type = "error")
-        log_msg("scCDC aborted: seu_pre missing or clusters missing.")
+        mark_analysis_error(
+          label = "scCDC failed",
+          detail = "scCDC needs a clustered Seurat object before contamination correction can run.",
+          progress = 70,
+          notify_text = "scCDC needs clustered Seurat object; retry after QC (Pre) clustering.",
+          log_text = "scCDC aborted: seu_pre missing or clusters missing."
+        )
         return()
       }
       restriction_factor <- as.numeric(input$sccdc_restriction %||% 0.5)
@@ -577,8 +867,6 @@ server <- function(input, output, session) {
         "Running scCDC (restriction_factor=%.2f, min.cell=%d, percent.cutoff=%.2f) with out_path.plot=%s",
         restriction_factor, min_cell, percent_cutoff, out_dir
       ))
-      log_msg("Completed scCDC")
-      
       GCGs <- tryCatch(
         scCDC::ContaminationDetection(
           seu,
@@ -590,10 +878,16 @@ server <- function(input, output, session) {
         error = function(e) e
       )
       if (inherits(GCGs, "error")) {
-        showNotification(paste("ContaminationDetection failed:", GCGs$message), type = "error")
-        log_msg("scCDC ContaminationDetection failed:", GCGs$message)
+        mark_analysis_error(
+          label = "scCDC failed",
+          detail = paste("ContaminationDetection returned an error:", GCGs$message),
+          progress = 70,
+          notify_text = paste("ContaminationDetection failed:", GCGs$message),
+          log_text = paste("scCDC ContaminationDetection failed:", GCGs$message)
+        )
         return()
       }
+      log_msg("Completed scCDC detection")
       rv$GCGs <- GCGs
       
       mis_pat <- "^scCDC_reportsdefault_SE-plot.*[.]pdf$"
@@ -622,7 +916,12 @@ server <- function(input, output, session) {
       gcg_genes <- tryCatch(rownames(GCGs), error=function(...) NULL)
       if (is.null(gcg_genes)) gcg_genes <- tryCatch(as.character(GCGs$gene), error=function(...) NULL)
       if (is.null(gcg_genes)) {
-        showNotification("scCDC: Could not extract GCG gene list.", type = "error")
+        mark_analysis_error(
+          label = "scCDC failed",
+          detail = "scCDC could not extract the GCG gene list needed for correction.",
+          progress = 75,
+          notify_text = "scCDC: Could not extract GCG gene list."
+        )
         return()
       }
       gcg_genes <- unique(gcg_genes[gcg_genes %in% rownames(seu)])
@@ -630,8 +929,13 @@ server <- function(input, output, session) {
       
       seu_corr <- tryCatch(scCDC::ContaminationCorrection(seu, gcg_genes), error = function(e) e)
       if (inherits(seu_corr, "error")) {
-        showNotification(paste("ContaminationCorrection failed:", seu_corr$message), type = "error")
-        log_msg("scCDC ContaminationCorrection failed:", seu_corr$message)
+        mark_analysis_error(
+          label = "scCDC correction failed",
+          detail = paste("ContaminationCorrection returned an error:", seu_corr$message),
+          progress = 75,
+          notify_text = paste("ContaminationCorrection failed:", seu_corr$message),
+          log_text = paste("scCDC ContaminationCorrection failed:", seu_corr$message)
+        )
         return()
       }
       corrected <- NULL
@@ -643,12 +947,18 @@ server <- function(input, output, session) {
         )
       }
       if (is.null(corrected)) {
-        showNotification("scCDC: Could not retrieve corrected counts from 'Corrected' assay.", type = "error")
-        log_msg("scCDC: 'Corrected' assay not found or no counts slot.")
+        mark_analysis_error(
+          label = "scCDC correction failed",
+          detail = "The corrected counts assay could not be retrieved from the scCDC result.",
+          progress = 75,
+          notify_text = "scCDC: Could not retrieve corrected counts from 'Corrected' assay.",
+          log_text = "scCDC: 'Corrected' assay not found or no counts slot."
+        )
         return()
       }
       if (!inherits(corrected, "dgCMatrix")) corrected <- as(corrected, "dgCMatrix")
       rv$adj_counts <- round_sparse(corrected)
+      log_msg("Completed scCDC correction")
       
       rv$rho <- NULL
       rv$sc  <- list(metaData = data.frame(
@@ -658,8 +968,49 @@ server <- function(input, output, session) {
       rv$auto <- NULL
     }
     
-    do_adjust_and_update()
+    set_analysis_status(
+      state = "running",
+      label = "Building result summaries",
+      detail = "Computing post-clean QC summaries, clustering, embeddings, and downloadable tables.",
+      progress = 88
+    )
+    post_ok <- tryCatch(
+      do_adjust_and_update(),
+      error = function(e) {
+        mark_analysis_error(
+          label = "Post-processing failed",
+          detail = paste("An unexpected error occurred while assembling the final results:", e$message),
+          progress = 88,
+          notify_text = paste("Post-processing failed:", e$message),
+          log_text = paste("Post-processing failed:", e$message)
+        )
+        FALSE
+      }
+    )
+    if (!isTRUE(post_ok)) {
+      return()
+    }
+    log_msg("Analysis completed successfully.")
+    set_analysis_status(
+      state = "completed",
+      label = "Analysis completed successfully",
+      detail = sprintf(
+        "%s finished and the result tabs are ready to review. The cleaned data and plots can now be downloaded.",
+        input$method
+      ),
+      progress = 100,
+      mark_end = TRUE
+    )
     updateTabsetPanel(session, "tabs", selected = "QC (Pre)")
+    }, error = function(e) {
+      mark_analysis_error(
+        label = "Analysis failed",
+        detail = paste("An unexpected error occurred while running the pipeline:", e$message),
+        progress = rv$analysis_progress,
+        notify_text = paste("Analysis failed:", e$message),
+        log_text = paste("Analysis failed:", e$message)
+      )
+    })
   })
   
   # -----------------------------
@@ -679,8 +1030,13 @@ server <- function(input, output, session) {
     defs <- species_defaults(input$species_genome)
     seu2 <- Seurat::CreateSeuratObject(counts = rv$adj_counts, min.cells = input$min_cells %||% 3)
     if (ncol(seu2) == 0) {
-      showNotification("No cells remained after decontamination. Try less aggressive settings.", type = "error")
-      return()
+      mark_analysis_error(
+        label = "No cells remained after decontamination",
+        detail = "The cleaned count matrix is empty. Try less aggressive decontamination settings and rerun the analysis.",
+        progress = 90,
+        notify_text = "No cells remained after decontamination. Try less aggressive settings."
+      )
+      return(FALSE)
     }
     seu2[["percent.mt"]] <- PercentageFeatureSet(seu2, pattern = defs$mito_regex)
     seu2 <- NormalizeData(seu2)
@@ -748,6 +1104,7 @@ server <- function(input, output, session) {
       order(-cells_df$nUMIs_post %||% 0, -cells_df$nUMIs_pre %||% 0),
     ]
     rv$cells_df <- cells_df
+    TRUE
   }
   
   ##########################
@@ -1184,17 +1541,96 @@ server <- function(input, output, session) {
                       width = w, height = h, dpi = dpi, limitsize = FALSE)
     }
   )
+
+  top_genes_df <- reactive({
+    req(rv$seu_pre, rv$seu_post)
+    pre_counts  <- Seurat::GetAssayData(rv$seu_pre,  layer = "counts", assay = DefaultAssay(rv$seu_pre))
+    post_counts <- Seurat::GetAssayData(rv$seu_post, layer = "counts", assay = DefaultAssay(rv$seu_post))
+    if (nrow(pre_counts) == 0 || ncol(pre_counts) == 0 ||
+        nrow(post_counts) == 0 || ncol(post_counts) == 0) {
+      return(data.frame())
+    }
+    pre_sum  <- Matrix::rowSums(pre_counts)
+    post_sum <- Matrix::rowSums(post_counts)
+    common <- intersect(rownames(pre_counts), rownames(post_counts))
+    df <- data.frame(
+      gene       = common,
+      total_pre  = as.numeric(pre_sum[common]),
+      total_post = as.numeric(post_sum[common]),
+      stringsAsFactors = FALSE
+    )
+    df$delta <- df$total_post - df$total_pre
+    df[order(-df$total_pre), , drop = FALSE]
+  })
+
+  sorted_cluster_counts_df <- reactive({
+    req(rv$cluster_counts_df)
+    df <- rv$cluster_counts_df
+    df$cluster <- as.character(df$cluster)
+    lev <- sort_clusters(df$cluster)
+    df[order(factor(df$cluster, levels = lev)), , drop = FALSE]
+  })
+
+  top_feature_gene <- reactive({
+    df <- top_genes_df()
+    if (!nrow(df)) return(character(0))
+    df$gene[[1]]
+  })
+
+  feature_plot_genes <- reactive({
+    genes <- clean_gene_list(input$featplot_genes)
+    if (length(genes)) return(genes)
+    top_gene <- top_feature_gene()
+    if (!length(top_gene) || !nzchar(top_gene)) return(character(0))
+    top_gene
+  })
+
+  observeEvent(top_feature_gene(), {
+    top_gene <- top_feature_gene()
+    if (!length(top_gene) || !nzchar(top_gene)) return()
+    current_value <- trimws(input$featplot_genes %||% "")
+    if (!nzchar(current_value) || identical(current_value, rv$featplot_autofill_gene)) {
+      updateTextInput(session, "featplot_genes", value = top_gene)
+      rv$featplot_autofill_gene <- top_gene
+    }
+  }, ignoreInit = TRUE)
   
   # Feature Plot
   output$featplot_warning <- renderUI({
-    genes <- clean_gene_list(input$featplot_genes)
-    if (length(genes) == 0)
-      return(tags$div(class = "text-muted", "Enter one or more gene symbols above."))
+    if (is.null(rv$seu_pre) || is.null(rv$seu_post)) {
+      return(tags$div(class = "text-muted", "Run the analysis to load a feature plot."))
+    }
+
+    typed_genes <- clean_gene_list(input$featplot_genes)
+    plotted_genes <- feature_plot_genes()
+
+    if (!length(typed_genes) && length(plotted_genes)) {
+      return(tags$div(
+        class = "text-info",
+        sprintf("Showing the top gene automatically: %s", plotted_genes[[1]])
+      ))
+    }
+
+    if (!length(plotted_genes)) {
+      return(tags$div(class = "text-muted", "No feature-plot genes are available for this run."))
+    }
+
+    present <- plotted_genes[plotted_genes %in% rownames(rv$seu_pre) & plotted_genes %in% rownames(rv$seu_post)]
+    missing <- setdiff(plotted_genes, present)
+    if (!length(present)) {
+      return(tags$div(class = "text-danger", "None of the selected genes are available in both pre and post data."))
+    }
+    if (length(missing)) {
+      return(tags$div(
+        class = "text-warning",
+        sprintf("Skipping unavailable genes: %s", paste(missing, collapse = ", "))
+      ))
+    }
     NULL
   })
   featplot_combined_obj <- reactive({
     req(rv$seu_pre, rv$seu_post)
-    genes <- clean_gene_list(input$featplot_genes)
+    genes <- feature_plot_genes()
     if (!length(genes)) return(NULL)
     present <- genes[genes %in% rownames(rv$seu_pre) & genes %in% rownames(rv$seu_post)]
     if (!length(present)) return(NULL)
@@ -1222,8 +1658,8 @@ server <- function(input, output, session) {
   observeEvent(input$open_dl_featplot, {
     showModal(modalDialog(
       title = "Download: Feature Plot (Pre vs Post)",
-      numericInput("featplot_h", "Figure height", 6),
-      numericInput("featplot_w", "Figure width", 12),
+      numericInput("featplot_h", "Figure height", 12),
+      numericInput("featplot_w", "Figure width", 6),
       numericInput("featplot_dpi", "Figure resolution", 300),
       selectInput("featplot_fmt", "Image format",
                   choices = c(".jpg", ".tiff", ".pdf", ".svg", ".bmp", ".eps", ".ps")),
@@ -1239,7 +1675,7 @@ server <- function(input, output, session) {
     content = function(file) {
       p <- featplot_combined_obj()
       if (is.null(p)) stop("No Feature Plot available")
-      h <- as.numeric(input$featplot_h  %||% 6)
+      h <- as.numeric(input$featplot_h  %||% max(6, 4.5 * length(feature_plot_genes())))
       w <- as.numeric(input$featplot_w  %||% 12)
       dpi <- as.numeric(input$featplot_dpi %||% 300)
       ggplot2::ggsave(filename = file, plot = p,
@@ -1249,27 +1685,14 @@ server <- function(input, output, session) {
   
   # Tables & downloads
   output$top_genes <- renderDT({
-    req(rv$seu_pre, rv$seu_post)
-    pre_counts  <- Seurat::GetAssayData(rv$seu_pre,  layer = "counts", assay = DefaultAssay(rv$seu_pre))
-    post_counts <- Seurat::GetAssayData(rv$seu_post, layer = "counts", assay = DefaultAssay(rv$seu_post))
-    if (nrow(pre_counts) == 0 || ncol(pre_counts) == 0 ||
-        nrow(post_counts) == 0 || ncol(post_counts) == 0) {
+    df <- top_genes_df()
+    if (!nrow(df)) {
       return(datatable(
         data.frame(message = "Counts are empty; cannot compute Top Genes."),
         options = list(pageLength = 5),
         rownames = FALSE
       ))
     }
-    pre_sum  <- Matrix::rowSums(pre_counts)
-    post_sum <- Matrix::rowSums(post_counts)
-    common <- intersect(rownames(pre_counts), rownames(post_counts))
-    df <- data.frame(
-      gene       = common,
-      total_pre  = as.numeric(pre_sum[common]),
-      total_post = as.numeric(post_sum[common])
-    )
-    df$delta <- df$total_post - df$total_pre
-    df <- df[order(-df$total_pre), ]
     datatable(df,
               options = list(pageLength = 10, scrollX = TRUE),
               rownames = FALSE, selection = "none")
@@ -1310,11 +1733,7 @@ server <- function(input, output, session) {
   # })
   
   output$cluster_counts_dt <- renderDT({
-    req(rv$cluster_counts_df)
-    df <- rv$cluster_counts_df
-    df$cluster <- as.character(df$cluster)
-    lev <- sort_clusters(df$cluster)
-    df <- df[order(factor(df$cluster, levels = lev)), , drop = FALSE]
+    df <- sorted_cluster_counts_df()
     datatable(
       df,
       options = list(pageLength = 10, scrollX = TRUE),
@@ -1326,21 +1745,9 @@ server <- function(input, output, session) {
   output$dl_topgenes_csv <- downloadHandler(
     filename = function() sprintf("top_genes_%s.csv", format(Sys.Date(), "%Y%m%d")),
     content = function(file) {
-      req(rv$seu_pre, rv$seu_post)
-      pre_counts  <- Seurat::GetAssayData(rv$seu_pre,  layer = "counts", assay = DefaultAssay(rv$seu_pre))
-      post_counts <- Seurat::GetAssayData(rv$seu_post, layer = "counts", assay = DefaultAssay(rv$seu_post))
-      if (nrow(pre_counts) == 0 || nrow(post_counts) == 0)
+      df <- top_genes_df()
+      if (!nrow(df))
         stop("Counts are empty.")
-      pre_sum  <- Matrix::rowSums(pre_counts)
-      post_sum <- Matrix::rowSums(post_counts)
-      common <- intersect(rownames(pre_counts), rownames(post_counts))
-      df <- data.frame(
-        gene       = common,
-        total_pre  = as.numeric(pre_sum[common]),
-        total_post = as.numeric(post_sum[common])
-      )
-      df$delta <- df$total_post - df$total_pre
-      df <- df[order(-df$total_pre), ]
       utils::write.csv(df, file, row.names = FALSE)
     }
   )
@@ -1363,12 +1770,7 @@ server <- function(input, output, session) {
   output$dl_cluster_counts_csv <- downloadHandler(
     filename = function() sprintf("cluster_counts_%s.csv", format(Sys.Date(), "%Y%m%d")),
     content = function(file) {
-      req(rv$cluster_counts_df)
-      df <- rv$cluster_counts_df
-      df$cluster <- as.character(df$cluster)
-      lev <- sort_clusters(df$cluster)
-      df <- df[order(factor(df$cluster, levels = lev)), , drop = FALSE]
-      utils::write.csv(df, file, row.names = FALSE)
+      utils::write.csv(sorted_cluster_counts_df(), file, row.names = FALSE)
     }
   )
   
@@ -1390,16 +1792,41 @@ server <- function(input, output, session) {
     ),
     content = function(file) {
       req(rv$seu_post)
-      
-      # make a copy so we don't change rv$seu_post in the app
-      seu_save <- rv$seu_post
-      
-      # if orig.ident exists, set Idents to that before saving
-      if ("orig.ident" %in% colnames(seu_save@meta.data)) {
-        Seurat::Idents(seu_save) <- seu_save$orig.ident
+
+      download_progress_value <- 0
+      set_download_stage <- function(state, detail, progress) {
+        download_progress_value <<- max(0, min(100, round(progress)))
+        update_bulk_download_progress(
+          state = state,
+          label = "Download Seurat",
+          detail = detail,
+          progress = download_progress_value
+        )
       }
-      
-      saveRDS(seu_save, file)
+
+      tryCatch({
+        set_download_stage("preparing", "Preparing the Seurat object for export.", 10)
+
+        # make a copy so we don't change rv$seu_post in the app
+        seu_save <- rv$seu_post
+
+        # if orig.ident exists, set Idents to that before saving
+        if ("orig.ident" %in% colnames(seu_save@meta.data)) {
+          Seurat::Idents(seu_save) <- seu_save$orig.ident
+        }
+
+        set_download_stage("running", "Writing the Seurat RDS file.", 70)
+        saveRDS(seu_save, file)
+        set_download_stage("completed", "Seurat download is ready.", 100)
+      }, error = function(e) {
+        update_bulk_download_progress(
+          state = "error",
+          label = "Download Seurat",
+          detail = conditionMessage(e),
+          progress = download_progress_value
+        )
+        stop(e)
+      })
     }
   )
   
@@ -1417,59 +1844,268 @@ server <- function(input, output, session) {
     contentType = "application/octet-stream",  # always binary
     content = function(file) {
       req(rv$adj_counts)
-      
-      mat <- rv$adj_counts
-      if (!methods::is(mat, "dgCMatrix")) {
-        mat <- as(mat, "dgCMatrix")
+
+      download_progress_value <- 0
+      set_download_stage <- function(state, detail, progress) {
+        download_progress_value <<- max(0, min(100, round(progress)))
+        update_bulk_download_progress(
+          state = state,
+          label = "Download Cleaned",
+          detail = detail,
+          progress = download_progress_value
+        )
       }
-      
-      ## make sure 10x-like dimnames exist
-      if (is.null(rownames(mat))) {
-        if (!is.null(rv$filt) && !is.null(rownames(rv$filt))) {
-          rownames(mat) <- rownames(rv$filt)[seq_len(nrow(mat))]
+
+      tryCatch({
+        set_download_stage("preparing", "Preparing the cleaned matrix for export.", 10)
+
+        mat <- rv$adj_counts
+        if (!methods::is(mat, "dgCMatrix")) {
+          mat <- as(mat, "dgCMatrix")
+        }
+
+        ## make sure 10x-like dimnames exist
+        if (is.null(rownames(mat))) {
+          if (!is.null(rv$filt) && !is.null(rownames(rv$filt))) {
+            rownames(mat) <- rownames(rv$filt)[seq_len(nrow(mat))]
+          } else {
+            rownames(mat) <- sprintf("gene_%s", seq_len(nrow(mat)))
+          }
+        }
+        if (is.null(colnames(mat))) {
+          if (!is.null(rv$filt) && !is.null(colnames(rv$filt))) {
+            colnames(mat) <- colnames(rv$filt)[seq_len(ncol(mat))]
+          } else {
+            colnames(mat) <- sprintf("cell_%s", seq_len(ncol(mat)))
+          }
+        }
+
+        if (identical(rv$upload_type, "h5")) {
+          ## ---- H5 cleaned output ----
+          if (!requireNamespace("rhdf5", quietly = TRUE)) {
+            showNotification("Package 'rhdf5' is required to write .h5 output.", type = "error")
+            stop("rhdf5 not installed")
+          }
+          set_download_stage("running", "Writing the cleaned H5 file.", 70)
+          write_10x_h5(mat, file)
         } else {
-          rownames(mat) <- sprintf("gene_%s", seq_len(nrow(mat)))
+          ## ---- MTX zip cleaned output ----
+          if (!requireNamespace("zip", quietly = TRUE)) {
+            showNotification("Package 'zip' is required for MTX zip download.", type = "error")
+            stop("zip package not installed")
+          }
+
+          td <- tempfile(pattern = "mtx_")
+          dir.create(td, recursive = TRUE, showWarnings = FALSE)
+
+          set_download_stage("running", "Writing cleaned matrix files.", 55)
+          # write matrix.mtx(.gz), barcodes.tsv(.gz), features.tsv(.gz)
+          write_cleaned_10x(mat, td, gzip = TRUE)
+
+          oldwd <- getwd()
+          on.exit(setwd(oldwd), add = TRUE)
+          setwd(td)
+
+          set_download_stage("packaging", "Preparing the cleaned zip file for download.", 85)
+          # make a proper zip archive
+          zip::zip(
+            zipfile = file,
+            files   = c("matrix.mtx.gz", "barcodes.tsv.gz", "features.tsv.gz")
+          )
         }
+
+        set_download_stage("completed", "Cleaned download is ready.", 100)
+      }, error = function(e) {
+        update_bulk_download_progress(
+          state = "error",
+          label = "Download Cleaned",
+          detail = conditionMessage(e),
+          progress = download_progress_value
+        )
+        stop(e)
+      })
+    }
+  )
+
+  observeEvent(input$open_bulk_download, {
+    showModal(modalDialog(
+      title = "Bulk Download: Tables + Images",
+      selectInput(
+        "bulk_download_fmt",
+        "Image format",
+        choices = c(".jpg", ".tiff", ".pdf", ".svg", ".bmp", ".eps", ".ps"),
+        selected = ".jpg"
+      ),
+      tags$p(
+        class = "text-muted",
+        "The zip file will include all available tables and plots from the current run with automatic figure sizes."
+      ),
+      downloadBttn("download_bulk_bundle", "Download zip"),
+      easyClose = TRUE
+    ))
+  })
+
+  output$download_bulk_bundle <- downloadHandler(
+    filename = function() {
+      sprintf("SCARR_Vis_bulk_download_%s.zip", format(Sys.time(), "%Y%m%d_%H%M%S"))
+    },
+    contentType = "application/zip",
+    content = function(file) {
+      req(rv$seu_pre, rv$seu_post)
+
+      bulk_progress_value <- 0
+      set_bulk_stage <- function(state, detail, progress) {
+        bulk_progress_value <<- max(0, min(100, round(progress)))
+        update_bulk_download_progress(
+          state = state,
+          label = "Bulk Download",
+          detail = detail,
+          progress = bulk_progress_value
+        )
       }
-      if (is.null(colnames(mat))) {
-        if (!is.null(rv$filt) && !is.null(colnames(rv$filt))) {
-          colnames(mat) <- colnames(rv$filt)[seq_len(ncol(mat))]
-        } else {
-          colnames(mat) <- sprintf("cell_%s", seq_len(ncol(mat)))
-        }
-      }
-      
-      if (identical(rv$upload_type, "h5")) {
-        ## ---- H5 cleaned output ----
-        if (!requireNamespace("rhdf5", quietly = TRUE)) {
-          showNotification("Package 'rhdf5' is required to write .h5 output.", type = "error")
-          stop("rhdf5 not installed")
-        }
-        write_10x_h5(mat, file)
-        
-      } else {
-        ## ---- MTX zip cleaned output ----
+
+      tryCatch({
+        set_bulk_stage("preparing", "Preparing tables and image settings.", 5)
+
         if (!requireNamespace("zip", quietly = TRUE)) {
-          showNotification("Package 'zip' is required for MTX zip download.", type = "error")
+          showNotification("Package 'zip' is required for bulk download.", type = "error")
           stop("zip package not installed")
         }
-        
-        td <- tempfile(pattern = "mtx_")
+
+        ext <- input$bulk_download_fmt %||% ".jpg"
+        dpi <- 300
+        feature_gene_count <- max(1L, length(feature_plot_genes()))
+        heatmap_topn <- max(10L, min(200L, as.integer(input$heatmap_topn %||% 50)))
+
+        build_heatmap_plot <- function(source_key) {
+          obj <- if (identical(source_key, "pre")) rv$seu_pre else rv$seu_post
+          feats <- head(VariableFeatures(obj), heatmap_topn)
+          if (length(feats) < 10) {
+            obj <- FindVariableFeatures(obj)
+            feats <- head(VariableFeatures(obj), heatmap_topn)
+          }
+          suppressWarnings(DoHeatmap(obj, features = feats, group.by = "seurat_clusters"))
+        }
+
+        td <- tempfile(pattern = "bulk_export_")
         dir.create(td, recursive = TRUE, showWarnings = FALSE)
-        
-        # write matrix.mtx(.gz), barcodes.tsv(.gz), features.tsv(.gz)
-        write_cleaned_10x(mat, td, gzip = TRUE)
-        
+        tables_dir <- file.path(td, "tables")
+        plots_dir <- file.path(td, "plots")
+        dir.create(tables_dir, recursive = TRUE, showWarnings = FALSE)
+        dir.create(plots_dir, recursive = TRUE, showWarnings = FALSE)
+
+        save_plot_file <- function(plot_obj, filename_stub, width, height) {
+          if (is.null(plot_obj)) return(invisible(FALSE))
+          ggplot2::ggsave(
+            filename = file.path(plots_dir, paste0(filename_stub, ext)),
+            plot = plot_obj,
+            width = width,
+            height = height,
+            dpi = dpi,
+            limitsize = FALSE
+          )
+          TRUE
+        }
+
+        set_bulk_stage("running", "Preparing summary tables.", 15)
+        utils::write.csv(top_genes_df(), file.path(tables_dir, "top_genes.csv"), row.names = FALSE)
+        if (!is.null(rv$cells_df)) {
+          utils::write.csv(rv$cells_df, file.path(tables_dir, "cells_table.csv"), row.names = FALSE)
+        }
+        if (!is.null(rv$cluster_counts_df)) {
+          utils::write.csv(sorted_cluster_counts_df(), file.path(tables_dir, "cluster_counts.csv"), row.names = FALSE)
+        }
+        utils::write.csv(total_cell_counts_df(), file.path(tables_dir, "total_cell_counts.csv"), row.names = FALSE)
+
+        set_bulk_stage("running", "Preparing plots for export.", 25)
+        plot_specs <- list(
+          list(name = "qc_pre_nFeature", plot = plot_pre_nFeature(), width = 8, height = 6),
+          list(name = "qc_pre_nCount", plot = plot_pre_nCount(), width = 8, height = 6),
+          list(name = "qc_pre_pctMT", plot = plot_pre_pctMT(), width = 8, height = 6),
+          list(name = "qc_post_nFeature", plot = plot_post_nFeature(), width = 8, height = 6),
+          list(name = "qc_post_nCount", plot = plot_post_nCount(), width = 8, height = 6),
+          list(name = "qc_post_pctMT", plot = plot_post_pctMT(), width = 8, height = 6),
+          list(name = "cluster_counts_bar", plot = plot_cluster_counts_bar(), width = 9, height = 5.5),
+          list(name = "umap_pre", plot = plot_umap_pre(), width = 8, height = 6),
+          list(name = "umap_post", plot = plot_umap_post(), width = 8, height = 6),
+          list(name = "tsne_pre", plot = plot_tsne_pre(), width = 8, height = 6),
+          list(name = "tsne_post", plot = plot_tsne_post(), width = 8, height = 6),
+          list(name = "heatmap_pre", plot = tryCatch(build_heatmap_plot("pre"), error = function(e) NULL), width = 10, height = max(8, 0.16 * heatmap_topn + 4)),
+          list(name = "heatmap_post", plot = tryCatch(build_heatmap_plot("post"), error = function(e) NULL), width = 10, height = max(8, 0.16 * heatmap_topn + 4)),
+          list(name = "featureplot_pre_post", plot = featplot_combined_obj(), width = 12, height = max(6, 4.5 * feature_gene_count))
+        )
+
+        if (identical(input$method, "SoupX") || identical(input$method, "DecontX")) {
+          plot_specs <- c(
+            plot_specs,
+            list(
+              list(name = "est_rho_density", plot = plot_est_density(), width = 8, height = 6),
+              list(name = "est_rho_vs_nUMIs", plot = plot_rho_vs_counts(), width = 8, height = 6)
+            )
+          )
+        }
+
+        if (identical(input$method, "SoupX")) {
+          plot_specs <- c(plot_specs, list(list(name = "est_auto", plot = plot_auto_plot(), width = 8, height = 6)))
+        }
+
+        if (identical(input$method, "DecontX")) {
+          plot_specs <- c(plot_specs, list(list(name = "decontx_contamination", plot = plot_decontx_contam(), width = 8, height = 6)))
+        }
+
+        if (identical(input$method, "scCDC")) {
+          plot_specs <- c(
+            plot_specs,
+            list(
+              list(name = "sccdc_contamination_delta", plot = plot_scCDC_delta(), width = 8, height = 6),
+              list(name = "sccdc_top_gcgs_pre_post", plot = plot_top_gcgs_prepost(), width = 10, height = 8)
+            )
+          )
+        }
+
+        if (identical(input$method, "FastCAR")) {
+          plot_specs <- c(
+            plot_specs,
+            list(
+              list(name = "fastcar_ambient_profile", plot = fastcar_profile_obj(), width = 8, height = 10),
+              list(name = "fastcar_reads_removed_per_cell", plot = fastcar_removed_hist_obj(), width = 8, height = 6)
+            )
+          )
+        }
+
+        plot_specs <- Filter(function(spec) !is.null(spec$plot), plot_specs)
+        total_plots <- length(plot_specs)
+        if (!total_plots) {
+          set_bulk_stage("running", "No plots were available; bundling tables only.", 70)
+        } else {
+          for (idx in seq_along(plot_specs)) {
+            spec <- plot_specs[[idx]]
+            progress_now <- 25 + round(55 * idx / total_plots)
+            set_bulk_stage(
+              "running",
+              sprintf("Preparing image %d of %d: %s", idx, total_plots, spec$name),
+              progress_now
+            )
+            save_plot_file(spec$plot, spec$name, spec$width, spec$height)
+          }
+        }
+
+        set_bulk_stage("packaging", "Preparing the zip file for download.", 90)
         oldwd <- getwd()
         on.exit(setwd(oldwd), add = TRUE)
         setwd(td)
-        
-        # make a proper zip archive
-        zip::zip(
-          zipfile = file,
-          files   = c("matrix.mtx.gz", "barcodes.tsv.gz", "features.tsv.gz")
+        files_to_zip <- list.files(td, recursive = TRUE, all.files = FALSE)
+        zip::zip(zipfile = file, files = files_to_zip)
+        set_bulk_stage("completed", "Bulk download package is ready.", 100)
+      }, error = function(e) {
+        update_bulk_download_progress(
+          state = "error",
+          label = "Bulk Download",
+          detail = conditionMessage(e),
+          progress = bulk_progress_value
         )
-      }
+        stop(e)
+      })
     }
   )
   

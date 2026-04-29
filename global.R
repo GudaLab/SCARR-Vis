@@ -1,4 +1,5 @@
 if (!require("shiny")) install.packages("shiny", dependencies = TRUE)
+if (!require("remotes")) install.packages("remotes", dependencies = TRUE)
 if (!require("shinythemes")) install.packages("shinythemes")
 if (!require("shinyWidgets")) install.packages("shinyWidgets")
 if (!require("shinycssloaders")) install.packages("shinycssloaders")
