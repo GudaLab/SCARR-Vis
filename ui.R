@@ -52,12 +52,17 @@ ui <- navbarPage(
         p("Provide both the raw/droplet matrix and the filtered/cell matrix. You can upload as:"),
         tags$li("A zip folder containing matrix.mtx.gz, barcodes.tsv.gz, features.tsv.gz; or"),
         tags$li("HDF5 (.h5) from Cell Ranger / other tools."),
+        div(
+          style = "text-align:center; margin-bottom:20px;",
+          tags$img(src = "images/Fig_1.jpg", class = "img-responsive", style = "max-width:100%;"),
+        ),
         h4("Estimate contamination"),
         p("Go to Step 2. Estimate Contamination and choose a method."),
         tags$li("SoupX: estimates sample-level ambient contamination (global ρ) from empty droplets; supports parameter tuning and cluster-aware count adjustment."),
         tags$li("DecontX: Infers per-cell Bayesian contamination; uses user-provided clusters or re-clusters; outputs decontaminated counts."),
         tags$li("scCDC: gene-specific contamination detection and correction (with doublet-aware adjustments)."),
         tags$li("FastCAR: fast ambient RNA correction using an empty-droplet UMI cutoff and gene-level contamination probability threshold, with optional ambient profiling to suggest a cutoff."),
+       
         h4("Compare results"),
         tags$li("Check QC (Pre) vs QC (Post), Estimation, Cluster Counts (Pre vs Post), UMAP (Pre vs Post), Top Genes, and the Cells table."),
         h4("Outputs and Visualization"),
