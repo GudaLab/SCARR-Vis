@@ -1991,8 +1991,10 @@ server <- function(input, output, session) {
         dir.create(td, recursive = TRUE, showWarnings = FALSE)
         tables_dir <- file.path(td, "tables")
         plots_dir <- file.path(td, "plots")
+        bulk_reports_dir <- file.path(td, "reports")
         dir.create(tables_dir, recursive = TRUE, showWarnings = FALSE)
         dir.create(plots_dir, recursive = TRUE, showWarnings = FALSE)
+        dir.create(bulk_reports_dir, recursive = TRUE, showWarnings = FALSE)
 
         save_plot_file <- function(plot_obj, filename_stub, width, height) {
           if (is.null(plot_obj)) return(invisible(FALSE))
@@ -2016,6 +2018,17 @@ server <- function(input, output, session) {
           utils::write.csv(sorted_cluster_counts_df(), file.path(tables_dir, "cluster_counts.csv"), row.names = FALSE)
         }
         utils::write.csv(total_cell_counts_df(), file.path(tables_dir, "total_cell_counts.csv"), row.names = FALSE)
+
+        if (identical(input$method, "scCDC") &&
+            !is.null(rv$scCDC_pdf_abs) &&
+            file.exists(rv$scCDC_pdf_abs)) {
+          set_bulk_stage("running", "Adding the scCDC PDF report.", 20)
+          file.copy(
+            from = rv$scCDC_pdf_abs,
+            to = file.path(bulk_reports_dir, sprintf("scCDC_report_%s.pdf", format(Sys.Date(), "%Y%m%d"))),
+            overwrite = TRUE
+          )
+        }
 
         set_bulk_stage("running", "Preparing plots for export.", 25)
         plot_specs <- list(
