@@ -18,10 +18,10 @@ ScRDAVis is deployed online and accessible at:
 
 ### Prerequisites
 Ensure the following software is installed:
-- **R** (>= 4.5.2): [Download R](https://www.r-project.org/)
-- **RStudio** (>= 2025.09.2): [Download RStudio](https://posit.co/download/rstudio-desktop/)
-- **Bioconductor** (>= 3.22)
-- **Shiny** (>= 1.11.1)
+- **R** (>= 4.6.1): [Download R](https://www.r-project.org/)
+- **RStudio** (>= 2026.07.1): [Download RStudio](https://posit.co/download/rstudio-desktop/)
+- **Bioconductor** (>= 3.23)
+- **Shiny** (>= 1.14.0)
 
 **Note:** SCARR-Vis has been tested with these versions. Using older versions of R may cause errors during package installation. Updating to the latest R version is recommended.
 
@@ -94,9 +94,20 @@ shiny::runGitHub('SCARR-Vis', 'GudaLab')
 ```
 
 #### Option 2: Download the source code from GitHub and run:
+## Running the app
+
+RNA-DAVis is a standard three-file Shiny app (`global.R`, `ui.R`, `server.R`).
+
+**In RStudio**
+
+1. Open the RNA-DAVis folder.
+2. Open `ui.R` (or `server.R` or `global.R`).
+3. Click the **▶ Run App** button in the top-right of the editor.
+
+**From the R console**
 ```
 library(shiny)
-runApp('/path/to/the/SCARR-Vis-master', launch.browser = TRUE)
+runApp('/path/to/the/SCARR-Vis', launch.browser = TRUE)
 ```
 Replace /path/to/the/SCARR-Vis-master with the actual path to the downloaded folder
 ## Usage
