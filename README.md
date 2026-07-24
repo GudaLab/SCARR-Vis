@@ -101,7 +101,7 @@ RNA-DAVis is a standard three-file Shiny app (`global.R`, `ui.R`, `server.R`).
 **In RStudio**
 
 1. Open the RNA-DAVis folder.
-2. Open `ui.R` (or `server.R` or `global.R`).
+2. Open `ui.R` or `server.R` or `global.R`.
 3. Click the **▶ Run App** button in the top-right of the editor.
 
 **From the R console**
@@ -109,7 +109,7 @@ RNA-DAVis is a standard three-file Shiny app (`global.R`, `ui.R`, `server.R`).
 library(shiny)
 runApp('/path/to/the/SCARR-Vis', launch.browser = TRUE)
 ```
-Replace /path/to/the/SCARR-Vis-master with the actual path to the downloaded folder
+Replace /path/to/the/SCARR-Vis with the actual path to the downloaded folder
 ## Usage
 
 A detailed user manual is available under the "Manual" tab at: [https://www.gudalab-rtools.net/SCARR-Vis](https://www.gudalab-rtools.net/SCARR-Vis)
