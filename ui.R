@@ -66,7 +66,7 @@ ui <- navbarPage(
         h4("Compare results"),
         tags$li("Check QC (Pre) vs QC (Post), Estimation, Cluster Counts (Pre vs Post), UMAP (Pre vs Post), Top Genes, and the Cells table."),
         h4("Outputs and Visualization"),
-        tags$li("Each figure and table can be downloaded individually with the selected dimensions, or the user can click the Bulk Download option to download all publication-quality plots in JPG, TIFF, PDF, SVG, PNG, BMP, EPS, or PS format, along with summary tables in .csv format. The user can also download cleaned Seurat/SCE objects, summaries, .h5 files, matrix/barcode/feature files based on the input format, or a complete ZIP bundle containing all available outputs."),
+        tags$li("Each figure and table can be downloaded individually with the selected dimensions, or the user can click the Bulk Download option to download all publication-quality plots in JPG, TIFF, PDF, SVG, BMP, EPS, or PS format, along with summary tables in .csv format. The user can also download cleaned Seurat/SCE objects, summaries, .h5 files, matrix/barcode/feature files based on the input format, or a complete ZIP bundle containing all available outputs."),
         hr(),
         h4("Tips"),
         tags$ul(
@@ -820,6 +820,21 @@ ui <- navbarPage(
           tags$small(
             em("Figure 12. Reproducibility summary table with selected parameters.")
           )
+        ),
+
+        hr(),
+        h3("11. Download outputs"),
+        p(
+          "After a successful run, the ", strong("Status"), " tab provides individual download buttons ",
+          "for the corrected Seurat object and cleaned count output, plus a ",
+          strong("Bulk Download Tables + Images"), " option for collecting the run outputs in one ZIP file."
+        ),
+        tags$ul(
+          tags$li(strong("Bulk tables:"), " top genes, cell-level metrics, cluster counts, and total cell counts are saved as CSV files."),
+          tags$li(strong("Bulk images:"), " all available QC, estimation, UMAP/tSNE, heatmap, feature plot, and method-specific images are exported with automatic height and width settings."),
+          tags$li(strong("Image format:"), " users choose one format for the bulk image export: JPG, TIFF, PDF, SVG, BMP, EPS, or PS."),
+          tags$li(strong("scCDC report:"), " when scCDC is selected and the ContaminationDetection PDF report has been generated, the report is included in the bulk ZIP under the reports folder."),
+          tags$li(strong("Progress:"), " bulk download, Seurat download, and cleaned-data download show a small live status notification while files are being prepared.")
         ),
         
         hr(),
