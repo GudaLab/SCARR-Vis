@@ -48,56 +48,39 @@ makeSoupX <- function(raw_counts, filt_counts) {
 }
 
 map_ensembl_to_symbol <- function(ids, species_genome) {
-  if (!requireNamespace("biomaRt", quietly = TRUE)) return(setNames(ids, NULL))
-  dataset <- switch(
-    species_genome,
+  ids <- as.character(ids); out <- ids
+  is_ens <- grepl("^ENS[A-Z]*G[0-9]+", ids)
+  if (!any(is_ens) || !requireNamespace("biomaRt", quietly = TRUE)) return(out)
+  dataset <- switch(species_genome,
     "Human (GRCh38)" = "hsapiens_gene_ensembl",
-    "Mouse (GRCm39)" = "mmusculus_gene_ensembl",
-    NULL
-  )
-  if (is.null(dataset)) return(setNames(ids, NULL))
-  ids_stripped <- sub("[.].*$", "", ids)
-  mart <- NULL
-  try({
-    mart <- biomaRt::useEnsembl("ensembl", dataset = dataset)
-  }, silent = TRUE)
-  if (is.null(mart)) try({
-    mart <- biomaRt::useMart("ENSEMBL_MART_ENSEMBL", dataset = dataset,
-                             host = "https://www.ensembl.org")
-  }, silent = TRUE)
-  if (is.null(mart)) return(setNames(ids, NULL))
-  tbl <- tryCatch({
-    biomaRt::getBM(
-      c("ensembl_gene_id","external_gene_name"),
-      "ensembl_gene_id",
-      unique(ids_stripped),
-      mart
-    )
-  }, error = function(e) NULL)
-  if (is.null(tbl) || nrow(tbl) == 0) return(setNames(ids, NULL))
-  map <- setNames(tbl$external_gene_name, tbl$ensembl_gene_id)
-  unname(
-    ifelse(
-      ids_stripped %in% names(map) & nzchar(map[ids_stripped]),
-      map[ids_stripped],
-      ids
-    )
-  )
+    "Mouse (GRCm39)" = "mmusculus_gene_ensembl", NULL)
+  if (is.null(dataset)) return(out)
+  stripped <- sub("[.].*$", "", ids[is_ens])
+  mart <- tryCatch(biomaRt::useEnsembl("genes", dataset = dataset), error = function(e) NULL)
+  if (is.null(mart)) mart <- tryCatch(
+    biomaRt::useMart("ENSEMBL_MART_ENSEMBL", dataset = dataset, host = "https://www.ensembl.org"),
+    error = function(e) NULL)
+  if (is.null(mart)) return(out)
+  tbl <- tryCatch(biomaRt::getBM(c("ensembl_gene_id", "external_gene_name"),
+                                 "ensembl_gene_id", unique(stripped), mart),
+                  error = function(e) NULL)
+  if (is.null(tbl) || !nrow(tbl)) return(out)
+  tbl <- tbl[!is.na(tbl$external_gene_name) & nzchar(tbl$external_gene_name), , drop = FALSE]
+  tbl <- tbl[!duplicated(tbl$ensembl_gene_id), , drop = FALSE]
+  sym <- tbl$external_gene_name[match(stripped, tbl$ensembl_gene_id)]
+  out[is_ens] <- ifelse(is.na(sym), ids[is_ens], sym)   # no symbol -> keep Ensembl ID
+  out
 }
 
 collapse_duplicated_rows <- function(m) {
   rn <- rownames(m)
+  bad <- is.na(rn) | !nzchar(rn)
+  if (any(bad)) rn[bad] <- paste0("unnamed_", which(bad))  # safety net: never NA names
   f <- factor(rn, levels = unique(rn))
-  Mt <- as(m, "dgTMatrix")
-  i_new <- as.integer(f)[Mt@i + 1]
-  res <- Matrix::sparseMatrix(
-    i = i_new,
-    j = Mt@j + 1,
-    x = Mt@x,
-    dims = c(length(levels(f)), ncol(m))
-  )
-  rownames(res) <- levels(f)
-  colnames(res) <- colnames(m)
+  grp <- Matrix::sparseMatrix(i = as.integer(f), j = seq_along(rn), x = 1,
+                              dims = c(nlevels(f), length(rn)))
+  res <- as(grp %*% m, "CsparseMatrix")   # sums duplicated rows
+  dimnames(res) <- list(levels(f), colnames(m))
   res
 }
 
