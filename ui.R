@@ -25,6 +25,7 @@ idleTimer();", timeoutSeconds*1000, timeoutSeconds, timeoutSeconds*1000)
 ui <- navbarPage(
   theme = shinytheme("cerulean"),
   "",
+  id = "main_nav",   # lets the Run log record which menu is open
   useShinyjs(),
   # head block so server's session$sendCustomMessage('force-reload') works
   tags$head(
@@ -183,7 +184,7 @@ ui <- navbarPage(
         # DecontX controls
         conditionalPanel(
           condition = "input.method == 'DecontX'",
-          numericInput("min_cells", "Min cells to keep (pre-filter)", value = 3, min = 1, step = 1),
+          numericInput("decontx_min_cells", "Min cells to keep (pre-filter)", value = 3, min = 1, step = 1),
           checkboxInput("decontx_use_clusters", "Use Seurat clusters as priors (recommended)", TRUE),
           numericInput("decontx_maxiter", "maxIter", value = 500, min = 50, step = 50),
           textInput("decontx_delta", "delta (two numbers, e.g., 10,10)", value = "10,10"),
@@ -1029,6 +1030,13 @@ ui <- navbarPage(
       ),
     ),
   ),
+
+  # --- Run log tab: live process log + R console mirror (scripts/runlog.R) ---
+  tabPanel(
+    "Run log",
+    scarr_runlog_ui()
+  ),
+
   tabPanel(
             "Session Info",
             tags$h4("R Session info"),

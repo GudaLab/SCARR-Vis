@@ -4,6 +4,21 @@
 # -----------------------------
 server <- function(input, output, session) {
   
+  ###### Run log (live process log shown in the "Run log" tab; see scripts/runlog.R)
+  runlog  <- scarr_runlog_start(input, output, session)
+  run_cmd <- runlog$cmd   # run_cmd(expr): show the R command in the Run log, then run it
+  # Route this session's observers, render functions and downloads through the
+  # Run log so everything they print to the R console (output, messages,
+  # warnings, errors) is mirrored live. The console output itself is unchanged.
+  observeEvent    <- runlog$observeEvent
+  observe         <- runlog$observe
+  renderPlot      <- runlog$renderPlot
+  renderUI        <- runlog$renderUI
+  renderText      <- runlog$renderText
+  renderPrint     <- runlog$renderPrint
+  renderDT        <- runlog$renderDT
+  downloadHandler <- runlog$downloadHandler
+
   ###### session info
   
   sess_txt <- reactive({
@@ -200,6 +215,8 @@ server <- function(input, output, session) {
       bulk_download_progress$notifier <- shiny::Progress$new(session, min = 0, max = 100, style = "notification")
     }
 
+    runlog$app(sprintf("%s [%s, %d%%] %s", label, state, as.integer(progress_num), detail %||% ""))
+
     title <- paste("SCARR-Vis -", label)
     status_text <- switch(
       state,
@@ -244,6 +261,7 @@ server <- function(input, output, session) {
     if (isTRUE(mark_end)) {
       rv$analysis_finished_at <- Sys.time()
     }
+    runlog$app(sprintf("%s [%s, %d%%] %s", label, state, as.integer(rv$analysis_progress), detail %||% ""))
     update_analysis_progress(
       state = state,
       label = label,
@@ -291,6 +309,13 @@ server <- function(input, output, session) {
   
   log_msg <- function(...) {
     rv$log <- c(rv$log, paste0(format(Sys.time(), "%H:%M:%S"), " - ", paste(..., collapse = " ")))
+    runlog$app(paste(..., collapse = " "))
+  }
+
+  # "Min cells to keep (pre-filter)": DecontX has its own box (decontx_min_cells);
+  # SoupX, scCDC and FastCAR use min_cells (the box in the SoupX panel).
+  min_cells_for_method <- function() {
+    (if (identical(input$method, "DecontX")) input$decontx_min_cells else input$min_cells) %||% 3
   }
 
   mark_analysis_error <- function(label, detail, progress = rv$analysis_progress,
@@ -355,8 +380,8 @@ server <- function(input, output, session) {
       log_msg("Using example data from:", normalizePath(ex_dir, mustWork = FALSE))
       ok <- TRUE
       try({
-        rv$raw  <- read_10x_any(ex_raw)
-        rv$filt <- read_10x_any(ex_filt)
+        run_cmd(rv$raw  <- read_10x_any(ex_raw))
+        run_cmd(rv$filt <- read_10x_any(ex_filt))
         rv$upload_type <- "h5"
       }, silent = TRUE)
       if (is.null(rv$raw) || is.null(rv$filt)) ok <- FALSE
@@ -427,8 +452,8 @@ server <- function(input, output, session) {
     log_msg("Loading FILTERED matrix from", filt_name)
     ok <- TRUE
     try({
-      rv$raw  <- read_10x_any(input$raw$datapath)
-      rv$filt <- read_10x_any(input$filt$datapath)
+      run_cmd(rv$raw  <- read_10x_any(input$raw$datapath))
+      run_cmd(rv$filt <- read_10x_any(input$filt$datapath))
     }, silent = TRUE)
     if (is.null(rv$raw) || is.null(rv$filt)) ok <- FALSE
     
@@ -503,7 +528,7 @@ server <- function(input, output, session) {
       looks_ens <- grepl("^(ENSG|ENSMUSG)", rn)
       if (any(looks_ens)) {
         log_msg("Converting Ensembl IDs to symbols via biomaRt for", input$species_genome)
-        conv <- tryCatch(map_ensembl_to_symbol(rn, input$species_genome), error=function(e) rn)
+        conv <- tryCatch(run_cmd(map_ensembl_to_symbol(rn, input$species_genome)), error=function(e) rn)
         rownames(raw)  <- conv
         rownames(filt) <- conv
       } else if (any(grepl("_", rn))) {
@@ -516,8 +541,8 @@ server <- function(input, output, session) {
     if (isTRUE(input$collapse_dups)) {
       if (any(duplicated(rownames(raw))) || any(duplicated(rownames(filt)))) {
         log_msg("Collapsing duplicated gene names by summing counts...")
-        raw  <- collapse_duplicated_rows(raw)
-        filt <- collapse_duplicated_rows(filt)
+        run_cmd(raw  <- collapse_duplicated_rows(raw))
+        run_cmd(filt <- collapse_duplicated_rows(filt))
       }
     } else if (any(duplicated(rownames(raw))) || any(duplicated(rownames(filt)))) {
       log_msg("Forcing unique gene names (suffixing .1, .2...). Consider enabling 'Collapse duplicate gene names'.")
@@ -532,26 +557,27 @@ server <- function(input, output, session) {
       progress = 50
     )
     log_msg("Creating Seurat object (pre-clean) and computing clusters/UMAP/TSNE...")
-    seu <- Seurat::CreateSeuratObject(counts = filt, min.cells = input$min_cells %||% 3)
+    min_cells <- min_cells_for_method()
+    run_cmd(seu <- Seurat::CreateSeuratObject(counts = filt, min.cells = min_cells))
     defs <- species_defaults(input$species_genome)
-    seu[["percent.mt"]] <- PercentageFeatureSet(seu, pattern = defs$mito_regex)
-    seu <- NormalizeData(seu)
-    seu <- FindVariableFeatures(seu)
-    seu <- ScaleData(seu, verbose=FALSE)
-    seu <- RunPCA(seu, npcs=30, verbose=FALSE)
-    seu <- FindNeighbors(seu, dims=1:20)
-    seu <- FindClusters(seu, resolution=0.5)
+    run_cmd(seu[["percent.mt"]] <- PercentageFeatureSet(seu, pattern = defs$mito_regex))
+    run_cmd(seu <- NormalizeData(seu))
+    run_cmd(seu <- FindVariableFeatures(seu))
+    run_cmd(seu <- ScaleData(seu, verbose=FALSE))
+    run_cmd(seu <- RunPCA(seu, npcs=30, verbose=FALSE))
+    run_cmd(seu <- FindNeighbors(seu, dims=1:20))
+    run_cmd(seu <- FindClusters(seu, resolution=0.5))
     ## identities = seurat_clusters (not orig.ident)
     if (!is.null(seu$seurat_clusters)) {
       Seurat::Idents(seu) <- seu$seurat_clusters
     }
     suppressWarnings({
       if (ncol(seu) >= 50)
-        seu <- tryCatch(RunUMAP(seu, dims=1:20), error=function(e) seu)
+        seu <- tryCatch(run_cmd(RunUMAP(seu, dims=1:20)), error=function(e) seu)
     })
     suppressWarnings({
       if (ncol(seu) >= 50)
-        seu <- tryCatch(RunTSNE(seu, dims = 1:20, check_duplicates = FALSE), error = function(e) seu)
+        seu <- tryCatch(run_cmd(RunTSNE(seu, dims = 1:20, check_duplicates = FALSE)), error = function(e) seu)
     })
     rv$seu_pre <- seu
     
@@ -566,8 +592,8 @@ server <- function(input, output, session) {
     # ---- SoupX ----
     if (identical(input$method, "SoupX")) {
       log_msg("Building SoupChannel and setting clusters...")
-      sc <- makeSoupX(raw, filt)
-      try({ sc <- setClusters(sc, setNames(seu$seurat_clusters, colnames(seu))) }, silent = TRUE)
+      run_cmd(sc <- makeSoupX(raw, filt))
+      try({ run_cmd(sc <- setClusters(sc, setNames(seu$seurat_clusters, colnames(seu)))) }, silent = TRUE)
       
       user_nonexp <- unique(trimws(unlist(strsplit(input$nonexp, ","))))
       user_nonexp <- user_nonexp[user_nonexp != ""]
@@ -576,7 +602,7 @@ server <- function(input, output, session) {
       if (length(genes_present) > 0) {
         log_msg("Marking non-expressing genes:", paste(head(genes_present,5), collapse=", "),
                 ifelse(length(genes_present)>5,"…",""))
-        try({ sc <- setNonExpressingGenes(sc, genes_present) }, silent = TRUE)
+        try({ run_cmd(sc <- setNonExpressingGenes(sc, genes_present)) }, silent = TRUE)
       } else {
         log_msg("No provided non-expressing genes found in data; proceeding without them.")
       }
@@ -590,20 +616,20 @@ server <- function(input, output, session) {
       toc_ok <- !is.null(sc$toc) && !is.null(dim(sc$toc)) && all(dim(sc$toc) > 0)
       if (!tod_ok || !toc_ok) {
         log_msg("WARNING: tod/toc not available or empty; using global soup profile fallback.")
-        prof_df <- soup_profile_df(sc, raw_mat = raw, filt_mat = filt)
-        sc      <- SoupX::setSoupProfile(sc, prof_df)
+        run_cmd(prof_df <- soup_profile_df(sc, raw_mat = raw, filt_mat = filt))
+        run_cmd(sc      <- SoupX::setSoupProfile(sc, prof_df))
       } else {
         drop_umis <- safe_colsums(sc$tod)
         idx <- which(drop_umis >= sr[1] & drop_umis <= sr[2])
         if (length(idx) < 50) {
           log_msg(sprintf("Only %d droplets in soupRange (%d,%d) — using global soup profile.", length(idx), sr[1], sr[2]))
-          prof_df <- soup_profile_df(sc, raw_mat = raw, filt_mat = filt)
-          sc      <- SoupX::setSoupProfile(sc, prof_df)
+          run_cmd(prof_df <- soup_profile_df(sc, raw_mat = raw, filt_mat = filt))
+          run_cmd(sc      <- SoupX::setSoupProfile(sc, prof_df))
         } else {
           log_msg(sprintf("Estimating soup profile: soupRange=(%d,%d), keepDroplets=%s",
                           sr[1], sr[2], as.character(input$keepDroplets)))
           sc <- tryCatch({
-            SoupX::estimateSoup(sc, soupRange = sr, keepDroplets = isTRUE(input$keepDroplets))
+            run_cmd(SoupX::estimateSoup(sc, soupRange = sr, keepDroplets = isTRUE(input$keepDroplets)))
           }, error = function(e) {
             log_msg("estimateSoup failed:", e$message, "— using global soup profile fallback.")
             prof_df <- soup_profile_df(sc, raw_mat = raw, filt_mat = filt)
@@ -624,7 +650,7 @@ server <- function(input, output, session) {
       
       if (isTRUE(input$do_auto)) {
         log_msg("Estimating contamination via autoEstCont...")
-        auto <- tryCatch({ SoupX::autoEstCont(sc, doPlot = input$do_plot) }, error=function(e) e)
+        auto <- tryCatch({ run_cmd(SoupX::autoEstCont(sc, doPlot = input$do_plot)) }, error=function(e) e)
         if (inherits(auto, "error")) {
           showNotification(paste("autoEstCont failed:", auto$message), type="error")
           log_msg("autoEstCont failed:", auto$message, "— falling back to ρ = 0.05 uniform.")
@@ -649,7 +675,7 @@ server <- function(input, output, session) {
       }
       
       log_msg("Adjusting counts with SoupX::adjustCounts (defaults; integers rounded)...")
-      adj <- tryCatch({ SoupX::adjustCounts(rv$sc, roundToInt = FALSE) }, error=function(e) e)
+      adj <- tryCatch({ run_cmd(SoupX::adjustCounts(rv$sc, roundToInt = FALSE)) }, error=function(e) e)
       if (inherits(adj, "error")) {
         mark_analysis_error(
           label = "SoupX failed",
@@ -677,9 +703,9 @@ server <- function(input, output, session) {
         return()
       }
       log_msg("Preparing SingleCellExperiment for decontX...")
-      sce <- SingleCellExperiment::SingleCellExperiment(
+      run_cmd(sce <- SingleCellExperiment::SingleCellExperiment(
         assays = list(counts = as(filt, "dgCMatrix"))
-      )
+      ))
       z <- NULL
       if (isTRUE(input$decontx_use_clusters)) {
         cl <- as.character(seu$seurat_clusters)
@@ -704,7 +730,7 @@ server <- function(input, output, session) {
                       as.integer(input$decontx_iterLogLik %||% 10),
                       as.integer(input$decontx_varGenes %||% 5000)))
       dx <- tryCatch({
-        celda::decontX(
+        run_cmd(celda::decontX(
           x = sce, z = z,
           maxIter       = as.integer(input$decontx_maxiter %||% 500),
           delta         = delta_vec,
@@ -713,7 +739,7 @@ server <- function(input, output, session) {
           iterLogLik    = as.integer(input$decontx_iterLogLik %||% 10),
           varGenes      = as.integer(input$decontx_varGenes %||% 5000),
           verbose       = TRUE
-        )
+        ))
       }, error = function(e) e)
       if (inherits(dx, "error")) {
         mark_analysis_error(
@@ -777,7 +803,7 @@ server <- function(input, output, session) {
       ))
       
       fc <- tryCatch(
-        scarr_fastcar_wrapper(
+        run_cmd(scarr_fastcar_wrapper(
           raw,
           filt,
           empty_droplet_cutoff        = empty_cutoff,
@@ -787,7 +813,7 @@ server <- function(input, output, session) {
           profile_stop                = prof_stop,
           profile_by                  = prof_by,
           use_recommended_cutoff      = use_reco
-        ),
+        )),
         error = function(e) e
       )
       
@@ -868,13 +894,13 @@ server <- function(input, output, session) {
         restriction_factor, min_cell, percent_cutoff, out_dir
       ))
       GCGs <- tryCatch(
-        scCDC::ContaminationDetection(
+        run_cmd(scCDC::ContaminationDetection(
           seu,
           restriction_factor = restriction_factor,
           min.cell           = min_cell,
           percent.cutoff     = percent_cutoff,
           out_path.plot      = out_dir
-        ),
+        )),
         error = function(e) e
       )
       if (inherits(GCGs, "error")) {
@@ -925,9 +951,9 @@ server <- function(input, output, session) {
         return()
       }
       gcg_genes <- unique(gcg_genes[gcg_genes %in% rownames(seu)])
-      rv$sccdc_quant <- tryCatch(scCDC::ContaminationQuantification(seu, gcg_genes), error = function(e) NULL)
+      rv$sccdc_quant <- tryCatch(run_cmd(scCDC::ContaminationQuantification(seu, gcg_genes)), error = function(e) NULL)
       
-      seu_corr <- tryCatch(scCDC::ContaminationCorrection(seu, gcg_genes), error = function(e) e)
+      seu_corr <- tryCatch(run_cmd(scCDC::ContaminationCorrection(seu, gcg_genes)), error = function(e) e)
       if (inherits(seu_corr, "error")) {
         mark_analysis_error(
           label = "scCDC correction failed",
@@ -1028,7 +1054,8 @@ server <- function(input, output, session) {
     }
     
     defs <- species_defaults(input$species_genome)
-    seu2 <- Seurat::CreateSeuratObject(counts = rv$adj_counts, min.cells = input$min_cells %||% 3)
+    min_cells <- min_cells_for_method()
+    run_cmd(seu2 <- Seurat::CreateSeuratObject(counts = rv$adj_counts, min.cells = min_cells))
     if (ncol(seu2) == 0) {
       mark_analysis_error(
         label = "No cells remained after decontamination",
@@ -1038,24 +1065,24 @@ server <- function(input, output, session) {
       )
       return(FALSE)
     }
-    seu2[["percent.mt"]] <- PercentageFeatureSet(seu2, pattern = defs$mito_regex)
-    seu2 <- NormalizeData(seu2)
-    seu2 <- FindVariableFeatures(seu2)
-    seu2 <- ScaleData(seu2, verbose=FALSE)
-    seu2 <- RunPCA(seu2, npcs=30, verbose=FALSE)
-    seu2 <- FindNeighbors(seu2, dims=1:20)
-    seu2 <- FindClusters(seu2, resolution=0.5)
+    run_cmd(seu2[["percent.mt"]] <- PercentageFeatureSet(seu2, pattern = defs$mito_regex))
+    run_cmd(seu2 <- NormalizeData(seu2))
+    run_cmd(seu2 <- FindVariableFeatures(seu2))
+    run_cmd(seu2 <- ScaleData(seu2, verbose=FALSE))
+    run_cmd(seu2 <- RunPCA(seu2, npcs=30, verbose=FALSE))
+    run_cmd(seu2 <- FindNeighbors(seu2, dims=1:20))
+    run_cmd(seu2 <- FindClusters(seu2, resolution=0.5))
     ## identities = seurat_clusters here as well
     if (!is.null(seu2$seurat_clusters)) {
       Seurat::Idents(seu2) <- seu2$seurat_clusters
     }
     suppressWarnings({
       if (ncol(seu2) >= 50)
-        seu2 <- tryCatch(RunUMAP(seu2, dims=1:20), error=function(e) seu2)
+        seu2 <- tryCatch(run_cmd(RunUMAP(seu2, dims=1:20)), error=function(e) seu2)
     })
     suppressWarnings({
       if (ncol(seu2) >= 50)
-        seu2 <- tryCatch(RunTSNE(seu2, dims = 1:20, check_duplicates = FALSE), error = function(e) seu2)
+        seu2 <- tryCatch(run_cmd(RunTSNE(seu2, dims = 1:20, check_duplicates = FALSE)), error = function(e) seu2)
     })
     rv$seu_post <- seu2
     
@@ -1816,7 +1843,7 @@ server <- function(input, output, session) {
         }
 
         set_download_stage("running", "Writing the Seurat RDS file.", 70)
-        saveRDS(seu_save, file)
+        run_cmd(saveRDS(seu_save, file))
         set_download_stage("completed", "Seurat download is ready.", 100)
       }, error = function(e) {
         update_bulk_download_progress(
@@ -1887,7 +1914,7 @@ server <- function(input, output, session) {
             stop("rhdf5 not installed")
           }
           set_download_stage("running", "Writing the cleaned H5 file.", 70)
-          write_10x_h5(mat, file)
+          run_cmd(write_10x_h5(mat, file))
         } else {
           ## ---- MTX zip cleaned output ----
           if (!requireNamespace("zip", quietly = TRUE)) {
@@ -1900,7 +1927,7 @@ server <- function(input, output, session) {
 
           set_download_stage("running", "Writing cleaned matrix files.", 55)
           # write matrix.mtx(.gz), barcodes.tsv(.gz), features.tsv(.gz)
-          write_cleaned_10x(mat, td, gzip = TRUE)
+          run_cmd(write_cleaned_10x(mat, td, gzip = TRUE))
 
           oldwd <- getwd()
           on.exit(setwd(oldwd), add = TRUE)
@@ -1938,7 +1965,7 @@ server <- function(input, output, session) {
       ),
       tags$p(
         class = "text-muted",
-        "The zip file will include all available tables and plots from the current run with automatic figure sizes."
+        "The zip file will include all available tables and plots from the current run with automatic figure sizes, plus the run log (SCARR-Vis_run_log.txt)."
       ),
       downloadBttn("download_bulk_bundle", "Download zip"),
       easyClose = TRUE
@@ -2103,12 +2130,15 @@ server <- function(input, output, session) {
           }
         }
 
+        set_bulk_stage("running", "Adding the run log (SCARR-Vis_run_log.txt).", 88)
+        runlog$write_txt(file.path(td, "SCARR-Vis_run_log.txt"))
+
         set_bulk_stage("packaging", "Preparing the zip file for download.", 90)
         oldwd <- getwd()
         on.exit(setwd(oldwd), add = TRUE)
         setwd(td)
         files_to_zip <- list.files(td, recursive = TRUE, all.files = FALSE)
-        zip::zip(zipfile = file, files = files_to_zip)
+        run_cmd(zip::zip(zipfile = file, files = files_to_zip))
         set_bulk_stage("completed", "Bulk download package is ready.", 100)
       }, error = function(e) {
         update_bulk_download_progress(

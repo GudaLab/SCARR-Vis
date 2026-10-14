@@ -1,3 +1,10 @@
+# ---------- Run log ----------
+# Load the Run log first so everything global.R prints to the console (package
+# loading, start-up messages, example-data download) is also shown at the top
+# of each session's Run log tab. See scripts/runlog.R.
+source("scripts/runlog.R")
+scarr_runlog_startup({
+
 if (!require("shiny")) install.packages("shiny", dependencies = TRUE)
 if (!require("remotes")) install.packages("remotes", dependencies = TRUE)
 if (!require("shinythemes")) install.packages("shinythemes")
@@ -105,4 +112,6 @@ if (!dir.exists(target_dir)) {
   cat("Example data folder already exists at:",
       normalizePath(target_dir), "- skipping download.\n")
 }
+
+}) # end scarr_runlog_startup()
 
