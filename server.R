@@ -2,6 +2,9 @@
 # -----------------------------
 # Server
 # -----------------------------
+# Run log helpers are normally loaded by global.R; load them here if missing.
+if (!exists("scarr_runlog_start", mode = "function")) source("scripts/runlog.R")
+
 server <- function(input, output, session) {
   
   ###### Run log (live process log shown in the "Run log" tab; see scripts/runlog.R)

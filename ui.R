@@ -1,6 +1,10 @@
 # -----------------------------
 # UI (navbarPage)
 # -----------------------------
+# Run log helpers are normally loaded by global.R. Load them here too if they are
+# missing (e.g. a Shiny Server process that started before global.R was updated).
+if (!exists("scarr_runlog_ui", mode = "function")) source("scripts/runlog.R")
+
 timeoutSeconds <- 36000
 
 inactivity <- sprintf("function idleTimer() {
